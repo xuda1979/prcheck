@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prcheck"
+version = "0.3.0"
+description = "PR security checklist + OpenAPI changelog generator for GitHub reviews"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+# never required for CI; kept for future real LLM integrations
+llm = []
+
+[project.scripts]
+prcheck = "prcheck.cli:main"
+
+[tool.setuptools]
+packages = ["prcheck"]

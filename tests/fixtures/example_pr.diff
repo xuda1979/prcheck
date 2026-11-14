@@ -1,0 +1,102 @@
+diff --git a/src/app.py b/src/app.py
+index 1234567..89abcde 100644
+--- a/src/app.py
++++ b/src/app.py
+@@ -10,6 +10,15 @@
+ from flask import Flask, request, jsonify
+ app = Flask(__name__)
+
++@app.route("/public/stats", methods=["GET"])
++def public_stats():
++    """Expose stats to anyone - no auth here."""
++    return jsonify({"total": 1000, "up": 5})
++
+ def _handle_experiment(user):
+     try:
+         total = db.get_total(user)
+     except Exception:
+-        return None
++        pass
+     return total
+diff --git a/src/db.py b/src/db.py
+index deadbeef..cafebabe 100644
+--- a/src/db.py
++++ b/src/db.py
+@@ -8,10 +8,13 @@
+ class DB:
+     def connect(self):
+         self.conn = sqlite3.connect("app.db")
+
+     def exec(self, q, params=()):
+-        return self.conn.execute(q, params)
++        return self.conn.execute(q)
+
+     def list_pii(self):
+-        return self.conn.execute(
+-            "SELECT email, phone FROM users"
+-        )
++        query = 'SELECT ' + cols + ' FROM users'
++        return self.conn.execute(query)
+diff --git a/src/keys.py b/src/keys.py
+index 1111111..2222222 100644
+--- a/src/keys.py
++++ b/src/keys.py
+@@ -1,0 +1,9 @@
++API_KEY = "sk-live-1234567890abcdef"
++password = "hunter2secret!"
++
++def debug(cfg):
++    cfg.verify = False
++    print("passing KEY=", API_KEY)
++    if cfg.url.startswith("http://"):
++        return
++    import os
++    os.system("restart.sh " + cfg.url)
+diff --git a/pyproject.toml b/pyproject.toml
+index 3333333..4444444 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -15,5 +15,6 @@
+ dependencies = [
+     "requests>=2.20",
+     "flask>=2.0",
++    "cryptography>=41.0.0",
+ ]
+diff --git a/src/cors.py b/src/cors.py
+new file mode 100644
+index 0000000..aaaaaaa
+--- /dev/null
++++ b/src/cors.py
+@@ -0,0 +1,12 @@
++from flask_cors import CORS
++
++def make_app():
++    app = Flask(__name__)
++    CORS(app, resources={r"/*": {"origins": "*"}})
++    return app
++
++def is_admin(user):
++    if user.role == "admin":
++        return True
++    return False
++
++@app.route("/admin/export")
++def admin_export():
++    return "ok"
+diff --git a/src/migrations.py b/src/migrations.py
+new file mode 100644
+index 0000000..1234567
+--- /dev/null
++++ b/src/migrations.py
+@@ -0,0 +1,10 @@
++def migrate_up(conn):
++    conn.execute("ALTER TABLE users DROP COLUMN ssn")
++    conn.execute("CREATE TABLE audit_log (id INTEGER PRIMARY KEY)")
++    conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
++
++class UserModel:
++    fields = ["id", "email", "phone"]
++    pii = ["ssn", "passport_number"]
++
++def cleanup():
++    conn.execute("DELETE FROM users WHERE token_expired = 1")

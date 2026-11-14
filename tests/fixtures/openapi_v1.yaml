@@ -1,0 +1,54 @@
+openapi: 3.0.3
+info:
+  title: Example API
+  version: 1.4.0
+  description: Baseline spec
+paths:
+  /pets:
+    get:
+      summary: List pets
+      operationId: listPets
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+          required: false
+      responses:
+        "200":
+          description: ok
+  /pets/{petId}:
+    get:
+      summary: Get a pet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+  /legacy:
+    get:
+      summary: Legacy endpoint (deprecated)
+      operationId: legacy
+      responses:
+        "200":
+          description: ok
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+    Owner:
+      type: object
+      properties:
+        id:
+          type: integer
+      required:
+        - id

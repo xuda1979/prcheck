@@ -1,0 +1,71 @@
+openapi: 3.0.3
+info:
+  title: Example API
+  version: 2.0.0
+  description: New spec with breaking changes
+paths:
+  /pets:
+    get:
+      summary: List pets v2
+      operationId: listPetsV2
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+          required: true
+        - name: filter
+          in: query
+          schema:
+            type: string
+          required: false
+      responses:
+        "200":
+          description: ok
+  /owners:
+    post:
+      summary: Create owner
+      operationId: createOwner
+      responses:
+        "201":
+          description: created
+  /pets/{petId}:
+    get:
+      summary: Get a pet
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+    delete:
+      summary: Delete a pet
+      operationId: deletePet
+      responses:
+        "204":
+          description: deleted
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        ownerId:
+          type: integer
+      required:
+        - id
+    Owner:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+      required:
+        - id
