@@ -104,6 +104,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--base-dir",
         help="base directory to resolve relative path refs (default: cwd)",
     )
+    p.add_argument(
+        "--cache-dir",
+        default=".prcheck-cache",
+        help="directory for the incremental analysis cache (default .prcheck-cache)",
+    )
+    p.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="disable the analysis cache",
+    )
     return p
 
 
@@ -158,21 +168,66 @@ def main(argv: Optional[list[str]] = None) -> int:
     else:
         sys.exit("error: no diff input (provide a diff file or pipe stdin)")
 
-    files = parse_diff(diff_text)
-    issues = run_rules(files)
-    issues = _filter_issues(
-        issues,
-        security_only=args.security_only,
-        data_only=args.data_only,
-        behavior_only=args.behavior_only,
-        min_severity=args.min_severity,
-    )
-    stat = compute_stats(files)
+    from .cache import AnalysisCache, payload_key
 
-    openapi_changes: list[dict] = []
-    semver: Optional[dict] = None
+    # NB: optional LLM summary is NOT part of the cache key (mock, costless)
+    spec_texts = []
     if args.openapi_old and args.openapi_new:
-        openapi_changes, semver = _load_openapi_changes(args.openapi_old, args.openapi_new)
+        try:
+            spec_texts = [_read(args.openapi_old), _read(args.openapi_new)]
+        except SystemExit:
+            spec_texts = []
+    option_tag = "|".join(
+        [
+            str(args.security_only),
+            str(args.data_only),
+            str(args.behavior_only),
+            args.min_severity,
+        ]
+    )
+    key = payload_key(diff_text, spec_texts, option_tag)
+    cache = AnalysisCache(args.cache_dir, enabled=not args.no_cache)
+
+    cached = cache.get(key)
+    if cached is not None:
+        files = parse_diff(diff_text)
+        issues = [Issue(**f) for f in cached["findings"]]
+        stat = cached["stats"]
+        openapi_changes = cached["openapi"]
+        semver: Optional[dict] = cached.get("semver")
+        print(f"[cache] hit {key}", file=sys.stderr)
+    else:
+        files = parse_diff(diff_text)
+        issues = run_rules(files)
+        issues = _filter_issues(
+            issues,
+            security_only=args.security_only,
+            data_only=args.data_only,
+            behavior_only=args.behavior_only,
+            min_severity=args.min_severity,
+        )
+        stat = compute_stats(files)
+
+        openapi_changes: list[dict] = []
+        semver = None
+        if args.openapi_old and args.openapi_new and spec_texts:
+            old_spec = load_spec(spec_texts[0], args.openapi_old)
+            new_spec = load_spec(spec_texts[1], args.openapi_new)
+            from .openapi import compare_specs, infer_semver
+
+            changes = compare_specs(old_spec, new_spec)
+            semver = infer_semver(old_spec.version_string, new_spec.version_string, changes)
+            openapi_changes = [c.to_dict() for c in changes]
+
+        cache.put(
+            key,
+            {
+                "findings": [i.__dict__ for i in issues],
+                "stats": stat,
+                "openapi": openapi_changes,
+                "semver": semver,
+            },
+        )
 
     high_issues = [i for i in issues if i.severity == "high"]
     gate_failed = args.require_high_ok and bool(high_issues)
