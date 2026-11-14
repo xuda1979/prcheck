@@ -1,0 +1,86 @@
+name: "prcheck"
+description: "PR security checklist + OpenAPI changelog gate"
+author: "xuda1979"
+inputs:
+  diff:
+    description: >
+      Inline unified diff to analyze. Leave empty to auto-derive from
+      `git diff base...head` in the workspace.
+    required: false
+    default: ""
+  base-spec:
+    description: "Old/previous OpenAPI spec (swagger 2 or OpenAPI 3) for the changelog."
+    required: false
+    default: ""
+  head-spec:
+    description: "New/current OpenAPI spec. Required together with base-spec."
+    required: false
+    default: ""
+  base-ref:
+    description: "Git ref to diff from (default origin/main)."
+    required: false
+    default: "origin/main"
+  head-ref:
+    description: "Git ref to diff to (default HEAD)."
+    required: false
+    default: "HEAD"
+  output-dir:
+    description: "Directory to write report.md / report.sarif / semver.json."
+    required: false
+    default: "prcheck-reports"
+  require-high-ok:
+    description: "Fail the build when unresolved High findings exist."
+    required: false
+    default: "false"
+  security-only:
+    description: "Keep only Security-category findings."
+    required: false
+    default: "false"
+  data-only:
+    description: "Keep only Data-category findings."
+    required: false
+    default: "false"
+  behavior-only:
+    description: "Keep only Behavior-category findings."
+    required: false
+    default: "false"
+  min-severity:
+    description: "Minimum severity to report (info|low|medium|high)."
+    required: false
+    default: "info"
+  post-comment:
+    description: >
+      Post the Markdown report as a PR comment. Requires a GITHUB_TOKEN with
+      pull-requests: write; the ephemeral default token works if set.
+    required: false
+    default: "false"
+outputs:
+  report-path:
+    description: "Path to the generated Markdown report."
+  sarif-path:
+    description: "Path to the generated SARIF log."
+  semver-file:
+    description: "Path to semver.json (includes suggested bump + gate state)."
+runs:
+  using: "composite"
+  steps:
+    - name: "prcheck"
+      id: prcheck
+      shell: bash
+      run: |
+        set -uo pipefail
+        PY=""
+        if command -v python3 >/dev/null 2>&1; then PY="python3"; else
+          echo "::error::python3 is required but not installed" >&2; exit 1
+        fi
+        # Composite actions re-export inputs as INPUT_* already.
+        ROOT="\${GITHUB_ACTION_PATH}"
+        export PYTHONPATH="\${ROOT}:\${PYTHONPATH:-}"
+        export PYTHONUTF8=1
+        "$PY" "\${ROOT}/action/run_action.py"
+        rc=$?
+        OUT="\${INPUT_OUTPUT_DIR:-prcheck-reports}"
+        echo "report-path=\${OUT}/report.md" >> "\${GITHUB_OUTPUT}"
+        echo "sarif-path=\${OUT}/report.sarif" >> "\${GITHUB_OUTPUT}"
+        echo "semver-file=\${OUT}/semver.json" >> "\${GITHUB_OUTPUT}"
+        exit $rc

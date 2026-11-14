@@ -86,8 +86,9 @@ def _render_openapi(buf: StringIO, changes: list) -> None:
     if breaking:
         buf.write(f"**Breaking changes:** {len(breaking)}\n\n")
         for c in breaking:
+            ref = c.get('path') or c.get('schema') or c.get('endpoint') or ''
             buf.write(f"- {_emoji_for(c.get('severity', 'medium'))} `{c['type']}`"
-                      f" `{c.get('path', '')}` — {c.get('summary', '')}\n")
+                      f" `{ref}` — {c.get('summary', '')}\n")
         buf.write("\n")
     if nonbreaking:
         buf.write(f"**Non-breaking changes:** {len(nonbreaking)}\n\n")

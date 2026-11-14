@@ -1,0 +1,54 @@
+name: prcheck-security-checklist
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write   # needed only for the comment step; set to read to disable
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prcheck:
+    name: Security checklist + OpenAPI changelog
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run prcheck
+        id: prcheck
+        uses: ./
+        with:
+          base-ref: ${{ github.event.pull_request.base.sha }}
+          head-ref: ${{ github.event.pull_request.head.sha }}
+          # Point at your spec files; the workflow compares old vs new.
+          base-spec: openapi/base.yaml
+          head-spec: openapi/current.yaml
+          require-high-ok: "true"
+          post-comment: "true"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload SARIF (code scanning)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prcheck-reports
+          path: ${{ steps.prcheck.outputs.report-path }}
+
+      - name: Annotate findings placeholder
+        if: failure()
+        run: |
+          echo "::warning::prcheck gate failed: review the checklist in the PR comment"
