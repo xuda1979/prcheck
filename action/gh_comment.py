@@ -16,7 +16,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import quote
 
 
 def _api_base() -> str:
@@ -69,13 +68,30 @@ def post_via_http(repo: str, pr_number: str, body: str) -> str:
         return payload.get("html_url", api)
 
 
-def _load_fixture_body() -> str:
-    """For offline demo/testing: stream the report to a fixture PR comment."""
+def _ghmock_dir() -> Path:
     p = Path(__file__).resolve().parent.parent / "tests" / "ghmock"
     p.mkdir(parents=True, exist_ok=True)
-    f = p / "posted_comment.md"
-    # Use the CLI to generate offline
+    return p
+
+
+def fixture_body_path() -> Path:
+    return _ghmock_dir() / "posted_comment.md"
+
+
+def _load_fixture_body() -> str:
+    """For offline demo/testing: stream the report to a fixture PR comment."""
+    f = fixture_body_path()
     return f.read_text() if f.exists() else ""
+
+
+def mock_post(repo: str, pr_number: str, body: str) -> str:
+    """Offline 'gh simulation': persist the comment body with metadata."""
+    path = fixture_body_path()
+    path.write_text(
+        f"<!-- gh-mock comment for {repo}#{pr_number} (no network) -->\n\n{body}",
+        encoding="utf-8",
+    )
+    return f"mock://{repo}/pull/{pr_number}#comment"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -88,6 +104,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="simplified local demo (no network)")
     ap.add_argument("--mock", action="store_true",
                     help="write body into tests/ghmock instead of posting")
+    ap.add_argument("--gh-cli", action="store_true",
+                    help="post via the `gh` CLI instead of the HTTP API")
     args = ap.parse_args(argv)
 
     if args.fixture_body:
@@ -101,15 +119,19 @@ def main(argv: list[str] | None = None) -> int:
     if not body:
         print("nothing to post", file=sys.stderr)
         return 2
+    if args.mock:
+        url = mock_post(args.repo or "", args.pr or "", body)
+        print(f"[mock] PR comment written -> {url}")
+        return 0
     if not (args.repo and args.pr):
-        print("--repo and --pr are required unless --fixture-body", file=sys.stderr)
+        print("--repo and --pr are required (or use --fixture-body/--mock)", file=sys.stderr)
         return 2
 
-    if args.mock or "--gh-cli" not in sys.argv:
-        # default to REST; tests/env may override with --gh-cli
-        url = post_via_http(args.repo, args.pr, body)
-    else:
-        url = post_via_gh_cli(args.repo, args.pr, body)
+    url = (
+        post_via_gh_cli(args.repo, args.pr, body)
+        if args.gh_cli
+        else post_via_http(args.repo, args.pr, body)
+    )
     print(f"comment posted: {url}")
     return 0
 

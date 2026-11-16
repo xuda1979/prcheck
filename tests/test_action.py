@@ -1,11 +1,9 @@
 """Tests for the GitHub Action entrypoint and gh-comment simulation (AC6)."""
 
-import io
 import json
 import os
 import subprocess
 import sys
-from contextlib import redirect_stdout
 from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -81,8 +79,7 @@ def test_run_action_range_diff_derive(tmp_path, monkeypatch):
 
 
 def test_gh_comment_mock(tmp_path, capsys):
-    """AC6: gh simulation — posting writes a comment body offline."""
-    body = "# example comment\n\n- [ ] check"
+    """AC6: gh simulation — the fixture comment body is loadable offline."""
     script = ROOT / "action" / "gh_comment.py"
     res = subprocess.run(
         [sys.executable, str(script), "--fixture-body"],
@@ -104,3 +101,15 @@ def test_gh_comment_requires_repo_pr():
     )
     assert res.returncode == 2
     assert "--repo and --pr" in res.stderr
+
+
+def test_gh_comment_mock_writes_fixture(tmp_path, monkeypatch):
+    """AC6: `--mock` writes the comment body into tests/ghmock (gh simulation)."""
+    from action import gh_comment
+
+    # point the mock writer at a temp dir so the tracked fixture isn't touched
+    monkeypatch.setattr(gh_comment, "_ghmock_dir", lambda: tmp_path)
+    url = gh_comment.mock_post("owner/repo", "42", "# hi\n- [ ] a")
+    assert url == "mock://owner/repo/pull/42#comment"
+    body = (tmp_path / "posted_comment.md").read_text()
+    assert "owner/repo#42" in body and "- [ ] a" in body

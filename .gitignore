@@ -7,3 +7,4 @@ build/
 dist/
 .reports/
 .prcheck-cache/
+.future-code/

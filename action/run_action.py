@@ -30,7 +30,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from prcheck.cli import main as cli_main
 from prcheck import __version__
 
 
@@ -85,32 +84,11 @@ def main() -> int:
         # not fatal: report empty analysis so the gate is meaningful
         diff_text = ""
 
-    # We generate analysis the same way the CLI does.
-    from prcheck.diff import compute_stats, parse_diff
-    from prcheck.issues import SEVERITY_ORDER
+    # We generate analysis the same way the CLI does (shared engine).
     from prcheck.render import render_markdown, render_sarif
-    from prcheck.rules import run_rules, RULES
-    from prcheck.openapi import compare_specs, infer_semver, load_spec
+    from prcheck.engine import run_analysis
 
-    files = parse_diff(diff_text)
-    issues = run_rules(files)
-    stat = compute_stats(files)
-
-    # category / severity filters
-    from prcheck.cli import _filter_issues
-
-    if _env_flag("INPUT_SECURITY_ONLY"):
-        issues = _filter_issues(issues, security_only=True)
-    elif _env_flag("INPUT_DATA_ONLY"):
-        issues = _filter_issues(issues, data_only=True)
-    elif _env_flag("INPUT_BEHAVIOR_ONLY"):
-        issues = _filter_issues(issues, behavior_only=True)
-    min_sev = os.environ.get("INPUT_MIN_SEVERITY", "info")
-    issues = _filter_issues(issues, min_severity=min_sev)
-
-    # OpenAPI changelog
-    openapi_changes: list = []
-    semver: dict | None = None
+    base_spec_text = new_spec_text = None
     base_spec = os.environ.get("INPUT_BASE_SPEC", "")
     head_spec = os.environ.get("INPUT_HEAD_SPEC", "")
     if base_spec and head_spec:
@@ -121,16 +99,29 @@ def main() -> int:
         if not head_path.is_absolute():
             head_path = workdir / head_path
         if base_path.exists() and head_path.exists():
-            old_s = load_spec(base_path.read_text(encoding="utf-8"), str(base_path))
-            new_s = load_spec(head_path.read_text(encoding="utf-8"), str(head_path))
-            changes = compare_specs(old_s, new_s)
-            openapi_changes = [c.to_dict() for c in changes]
-            semver = infer_semver(old_s.version_string, new_s.version_string, changes)
+            base_spec_text = base_path.read_text(encoding="utf-8")
+            new_spec_text = head_path.read_text(encoding="utf-8")
         else:
             sys.stderr.write(
                 f"prcheck-action: openapi specs missing "
                 f"({base_path}, {head_path}); skipping changelog\n"
             )
+
+    result = run_analysis(
+        diff_text,
+        base_spec_text=base_spec_text,
+        new_spec_text=new_spec_text,
+        base_spec_name=str(base_spec),
+        new_spec_name=str(head_spec),
+        security_only=_env_flag("INPUT_SECURITY_ONLY"),
+        data_only=_env_flag("INPUT_DATA_ONLY"),
+        behavior_only=_env_flag("INPUT_BEHAVIOR_ONLY"),
+        min_severity=os.environ.get("INPUT_MIN_SEVERITY", "info"),
+    )
+    issues = result.issues
+    stat = result.stat
+    openapi_changes = result.openapi_changes
+    semver = result.semver
 
     high_issues = [i for i in issues if i.severity == "high"]
     gate = _env_flag("INPUT_REQUIRE_HIGH_OK")

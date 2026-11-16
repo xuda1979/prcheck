@@ -2,9 +2,7 @@
 
 from pathlib import Path
 
-from prcheck.issues import Issue
-from prcheck.rules import RULES, analyze_to_issues, run_rules
-from prcheck.diff import parse_diff
+from prcheck.rules import RULES, analyze_to_issues
 
 FIXTURE = Path(__file__).parent / "fixtures" / "example_pr.diff"
 

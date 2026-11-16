@@ -12,9 +12,11 @@ V1 = FIXTURES / "openapi_v1.yaml"
 V2 = FIXTURES / "openapi_v2.yaml"
 
 
-def _run(args, **kw):
+def _run(args, env_extra=None, **kw):
     env = dict(os.environ)
     env["PYTHONPATH"] = str(Path(__file__).parent.parent)
+    if env_extra:
+        env.update(env_extra)
     return subprocess.run(
         [sys.executable, "-m", "prcheck", *args],
         capture_output=True,
@@ -89,3 +91,91 @@ def test_cli_stdin_pipe():
 def test_cli_version():
     r = _run(["--version"])
     assert r.stdout.strip() == f"prcheck {__import__('prcheck').__version__}"
+
+
+def test_cli_requires_both_openapi_flags():
+    """Only one of --openapi-old/--openapi-new is a config error."""
+    r = _run(["-d", str(DIFF), "--openapi-old", str(V1)])
+    assert r.returncode == 1
+    assert "must be used together" in r.stderr
+    r2 = _run(["-d", str(DIFF), "--openapi-new", str(V2)])
+    assert r2.returncode == 1
+    assert "must be used together" in r2.stderr
+
+
+def _fake_gh(tmp_path, diff_text, *, fail=False):
+    """A fake `gh` on PATH: prints diff_text for `pr diff`, or errors.
+
+    Also appends the invocation args to FAKE_GH_LOG (if set) so tests can
+    assert which repo/PR the CLI asked for.
+    """
+    script = """import os, sys
+args = sys.argv[1:]
+log = os.environ.get('FAKE_GH_LOG')
+if log:
+    with open(log, 'a') as f:
+        f.write(repr(args) + '\\n')
+if args[:2] != ['pr', 'diff']:
+    sys.stderr.write('unexpected args: %r\\n' % args)
+    sys.exit(3)
+if __FAIL__:
+    sys.stderr.write('gh: could not resolve to a Pull Request\\n')
+    sys.exit(1)
+sys.stdout.write(__DIFF__)
+"""
+    script = script.replace("__FAIL__", "True" if fail else "False")
+    script = script.replace("__DIFF__", repr(diff_text))
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "gh").write_text(f"#!/usr/bin/env python3\n{script}")
+    (bindir / "gh").chmod(0o755)
+    return bindir
+
+
+def test_cli_fetch_pr_diff_via_gh(tmp_path):
+    """SPEC FR1: `--repo/--pr` fetch the diff through a (fake) gh on PATH."""
+    log = tmp_path / "gh.log"
+    bindir = _fake_gh(tmp_path, DIFF.read_text())
+    r = _run(
+        ["--repo", "owner/repo", "--pr", "42", "--json", "--no-cache"],
+        env_extra={"PATH": f"{bindir}:{os.environ['PATH']}", "FAKE_GH_LOG": str(log)},
+    )
+    assert r.returncode == 0, r.stderr
+    data = json.loads(r.stdout)
+    assert data["stats"]["files_changed"] == 6
+    invoked = log.read_text().strip()
+    assert "'--repo', 'owner/repo'" in invoked and "'42'" in invoked
+    assert any(f["category"] == "security" for f in data["findings"]), (
+        "expected security findings from the fetched diff"
+    )
+
+
+def test_cli_fetch_pr_missing_gh(tmp_path):
+    """Missing `gh` on PATH is a clear error, not a traceback."""
+    bindir = tmp_path / "empty"  # keep PYTHONPATH; no gh binary here
+    bindir.mkdir()
+    env = {**os.environ, "PATH": str(bindir)}
+    r = _run(
+        ["--repo", "owner/repo", "--pr", "42"],
+        env_extra={"PATH": str(bindir)},
+    )
+    assert r.returncode == 1
+    assert "gh` not found" in r.stderr
+
+
+def test_cli_fetch_pr_failure_propagates(tmp_path):
+    """A failing `gh pr diff` surfaces gh's stderr as the error."""
+    bindir = _fake_gh(tmp_path, "", fail=True)
+    r = _run(
+        ["--repo", "owner/repo", "--pr", "42"],
+        env_extra={"PATH": f"{bindir}:{os.environ['PATH']}"},
+    )
+    assert r.returncode == 1
+    assert "could not resolve to a Pull Request" in r.stderr
+
+
+def test_cli_repo_pr_conflicts_with_diff_file():
+    """--repo/--pr and a diff file are mutually exclusive sources."""
+    r = _run(["--repo", "owner/repo", "--pr", "42", "-d", str(DIFF)])
+    assert r.returncode == 1
+    assert "cannot be combined" in r.stderr

@@ -16,13 +16,17 @@ import json
 import os
 from pathlib import Path
 
+# Bump whenever the rule engine / OpenAPI comparison changes in a way that
+# changes output for the same input; stale cache entries then simply miss.
+ENGINE_VERSION = "6"
+
 
 def _hash(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
 
 
 def payload_key(diff_text: str, spec_texts: list[str], option_tag: str) -> str:
-    raw = "\x00".join([diff_text, *spec_texts, option_tag])
+    raw = "\x00".join([ENGINE_VERSION, diff_text, *spec_texts, option_tag])
     return _hash(raw)
 
 

@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -52,16 +52,20 @@ class Spec:
         return str(self.info.get("version", ""))
 
     def paths(self) -> dict:
-        return self.raw.get("paths", {}) or {}
+        paths = self.raw.get("paths", {})
+        return paths if isinstance(paths, dict) else {}
 
     def components_schemas(self) -> dict:
         if self.version == SpecVersion.OPENAPI_3:
-            return ((self.raw.get("components") or {}).get("schemas") or {}) or {}
-        return self.raw.get("definitions") or {}
+            schemas = ((self.raw.get("components") or {}).get("schemas") or {}) or {}
+        else:
+            schemas = self.raw.get("definitions") or {}
+        return schemas if isinstance(schemas, dict) else {}
 
     def iter_operations(self):
         """Yield (path, http_method, operation_dict)."""
-        for path, item in (self.raw.get("paths") or {}).items():
+        paths = self.paths()
+        for path, item in paths.items():
             if not isinstance(item, dict):
                 continue
             for method in ("get", "post", "put", "patch", "delete", "head", "options"):
@@ -78,13 +82,47 @@ def load_spec(text: str, source: str = "") -> Spec:
         raise ValueError(f"invalid YAML in {source or 'spec'}: {e}") from e
     if not isinstance(data, dict):
         raise ValueError(f"{source or 'spec'} is not a mapping")
-    openapi = data.get("openapi")
-    if isinstance(openapi, str):
-        return Spec(data, SpecVersion.OPENAPI_3, source)
-    swagger = data.get("swagger")
-    if isinstance(swagger, str):
-        return Spec(data, SpecVersion.SWAGGER_2, source)
-    raise ValueError(f"{source or 'spec'}: missing 'openapi'/'swagger' version field")
+
+    if isinstance(data.get("openapi"), str):
+        version = SpecVersion.OPENAPI_3
+    elif isinstance(data.get("swagger"), str):
+        version = SpecVersion.SWAGGER_2
+    else:
+        raise ValueError(
+            f"{source or 'spec'}: missing 'openapi'/'swagger' version field"
+        )
+
+    # Guard against structurally invalid docs: `paths` (and, for v3,
+    # `components.schemas`) must be maps when present. A doc where these are
+    # lists/scalars cannot be diffed meaningfully, so fail loudly instead of
+    # silently emitting an empty changelog in CI.
+    paths = data.get("paths")
+    if paths is not None and not isinstance(paths, dict):
+        raise ValueError(
+            f"{source or 'spec'}: 'paths' must be a mapping, got {type(paths).__name__}"
+        )
+    if version == SpecVersion.OPENAPI_3:
+        components = data.get("components")
+        if components is not None:
+            if not isinstance(components, dict):
+                raise ValueError(
+                    f"{source or 'spec'}: 'components' must be a mapping, "
+                    f"got {type(components).__name__}"
+                )
+            schemas = components.get("schemas")
+            if schemas is not None and not isinstance(schemas, dict):
+                raise ValueError(
+                    f"{source or 'spec'}: 'components.schemas' must be a mapping, "
+                    f"got {type(schemas).__name__}"
+                )
+    else:
+        definitions = data.get("definitions")
+        if definitions is not None and not isinstance(definitions, dict):
+            raise ValueError(
+                f"{source or 'spec'}: 'definitions' must be a mapping, "
+                f"got {type(definitions).__name__}"
+            )
+    return Spec(data, version, source)
 
 
 # -------------------------------------------------------------------------
@@ -136,10 +174,13 @@ def _deep_equals(a: Any, b: Any) -> bool:
     )
 
 
-def _schema_change_sev(change: dict) -> str:
-    if change.get("breaking"):
-        return "medium" if change.get("type") == "schema-type-changed" else "low"
-    return "low"
+def _param_schema(np: dict) -> dict:
+    """Effective parameter schema: OAS3 uses `schema`, swagger2 uses `type`."""
+    if isinstance(np.get("type"), str):  # swagger 2 data type declared inline
+        schema = np.get("schema")
+        return schema if isinstance(schema, dict) else {"type": np["type"]}
+    schema = np.get("schema")
+    return schema if isinstance(schema, dict) else {}
 
 
 def compare_params(old_op: dict, new_op: dict, path: str, method: str) -> list[Change]:
@@ -149,7 +190,7 @@ def compare_params(old_op: dict, new_op: dict, path: str, method: str) -> list[C
     old_by = {_pkey(p): p for p in old_ps}
     new_by = {_pkey(p): p for p in new_ps}
 
-    for key, np in new_by.items():
+    for key, np_ in new_by.items():
         op = old_by.get(key)
         if op is None:
             changes.append(
@@ -165,8 +206,8 @@ def compare_params(old_op: dict, new_op: dict, path: str, method: str) -> list[C
             )
             continue
         # same param exists: check required/schema
-        if op.get("required") != np.get("required"):
-            if np.get("required") and op.get("required") is not True:
+        if op.get("required") != np_.get("required"):
+            if np_.get("required") and op.get("required") is not True:
                 changes.append(
                     Change(
                         kind="parameter",
@@ -178,7 +219,7 @@ def compare_params(old_op: dict, new_op: dict, path: str, method: str) -> list[C
                         severity="high",
                     )
                 )
-        ns, os_ = np.get("schema"), op.get("schema")
+        ns, os_ = _param_schema(np_), _param_schema(op)
         if ns and os_ and not _deep_equals(ns, os_):
             changes.append(
                 Change(
@@ -209,23 +250,34 @@ def compare_params(old_op: dict, new_op: dict, path: str, method: str) -> list[C
 
 
 def _pkey(p: dict) -> str:
-    loc = "path" if p.get("in") == "path" else (p.get("in") or "query")
-    return f'{(p.get("name") or "")}'
+    # parameter identity is (name, location) so path/query/header params with
+    # the same name are not conflated
+    return f'{(p.get("in") or "query")}:{(p.get("name") or "")}'
 
 
 def _param_schema_breaking(ns: dict, os_: dict) -> bool:
-    if "type" in ns or "type" in os_:
-        return ns.get("type") != os_.get("type")
+    """True when a consumer sending the old value would now be invalid."""
+    ns = ns or {}
+    os_ = os_ or {}
+    if ns.get("type") and os_.get("type"):
+        return ns["type"] != os_["type"]
     if "$ref" in ns and "$ref" in os_:
         return ns["$ref"] != os_["$ref"]
+    if ns.get("type") and not os_.get("type") and os_.get("$ref"):
+        return True
     return False
 
 
 def _compare_schema_attrs(old: dict, new: dict) -> list[tuple[str, Any, Any]]:
-    """Yield (propertyOrKey, oldVal, newVal) for changed primitive props."""
+    """Yield (propertyOrKey, oldVal, newVal) for changed primitive props.
+
+    ``properties``/``required`` are reported at property level below, so they
+    are skipped here to avoid duplicating (and mis-classifying) the whole-map
+    comparison as a flat attribute change.
+    """
     out = []
     for k in set(old) | set(new):
-        if k in ("description", "example", "default"):
+        if k in ("description", "example", "default", "properties", "required"):
             continue
         if k in old and k in new and not _deep_equals(old[k], new[k]):
             out.append((k, old[k], new[k]))
@@ -258,6 +310,19 @@ def compare_schemas(old: Spec, new: Spec) -> list[Change]:
         # property add/remove/change
         old_props = (os_.get("properties") or {})
         new_props = (ns.get("properties") or {})
+        old_required = set(os_.get("required") or [])
+        new_required = set(ns.get("required") or [])
+        for prop in sorted(new_required - old_required):
+            changes.append(
+                Change(
+                    "schema",
+                    schema=name,
+                    detail=prop,
+                    summary=f"schema `{name}`: property `{prop}` is now required",
+                    breaking=True,
+                    severity="high",
+                )
+            )
         for prop, val in new_props.items():
             if prop not in old_props:
                 changes.append(
@@ -309,14 +374,15 @@ def _attr_breaking(attr: str, old_v: Any, new_v: Any) -> bool:
 
 
 def _prop_breaking(old_prop: Any, new_prop: Any) -> bool:
-    if isinstance(old_prop, dict) and isinstance(new_prop, dict):
-        if "type" in old_prop and "type" in new_prop and old_prop["type"] != new_prop["type"]:
-            return True
-        if (old_prop.get("required") or False) and not (new_prop.get("required") or False):
-            return True  # not really breaking, keep non-breaking
-    if old_prop != new_prop:
-        # unknown structural change default non-breaking? conservative:
-        return False
+    """A property-level change is breaking when an old value becomes invalid."""
+    if not isinstance(old_prop, dict) or not isinstance(new_prop, dict):
+        return old_prop != new_prop and old_prop is not None
+    if "type" in old_prop and "type" in new_prop:
+        return old_prop["type"] != new_prop["type"]
+    if "$ref" in old_prop and "$ref" in new_prop:
+        return old_prop["$ref"] != new_prop["$ref"]
+    # an unknown, non-primitive structural change is not classified as
+    # breaking by default (conservative)
     return False
 
 
@@ -395,9 +461,6 @@ def infer_semver(old_version: str, new_version: str, changes: list[Change]) -> d
     added_nonbreaking = any(
         not c.breaking and c.kind in ("endpoint", "parameter", "schema")
         for c in changes
-    )
-    has_any = any(
-        c.kind in ("endpoint", "parameter", "schema", "operation") for c in changes
     )
     suggestion = "patch"
     if breaking:

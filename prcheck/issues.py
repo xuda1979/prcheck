@@ -54,6 +54,34 @@ def severity_filter(issues: list[Issue], min_severity: str = "info") -> list[Iss
     return [i for i in issues if i.sev_rank() >= rank]
 
 
+def filter_issues(
+    issues: list[Issue],
+    *,
+    security_only: bool = False,
+    data_only: bool = False,
+    behavior_only: bool = False,
+    min_severity: str = "info",
+) -> list[Issue]:
+    """Apply category + minimum-severity filters.
+
+    This is the single filter entry point shared by the CLI, the GitHub Action
+    and the webhook bridge, so all entry points honor identical filtering.
+    """
+    rank = SEVERITY_ORDER.get(min_severity, 0)
+    out: list[Issue] = []
+    for i in issues:
+        if security_only and i.category != "security":
+            continue
+        if data_only and i.category != "data":
+            continue
+        if behavior_only and i.category != "behavior":
+            continue
+        if SEVERITY_ORDER.get(i.severity, 0) < rank:
+            continue
+        out.append(i)
+    return out
+
+
 def group_by_category(issues: list[Issue]) -> dict[str, list[Issue]]:
     from .issues import CATEGORY_LABELS
 

@@ -38,7 +38,6 @@ def test_sarif_valid_json_and_rule_defs():
     assert run["tool"]["driver"]["name"] == "prcheck"
     assert len(run["results"]) == len(issues)
     # a high finding maps to sarif error level
-    highs = [i for i in issues if i.severity == "high"]
     assert any(r.get("level") == "error" for r in run["results"] if r["ruleId"] in {"R001-a", "R002"})
     assert run["tool"]["driver"]["rules"]
 

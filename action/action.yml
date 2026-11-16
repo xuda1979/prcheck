@@ -73,6 +73,13 @@ runs:
         if command -v python3 >/dev/null 2>&1; then PY="python3"; else
           echo "::error::python3 is required but not installed" >&2; exit 1
         fi
+        # The rule engine is stdlib-only, but OpenAPI parsing needs PyYAML.
+        # Self-provision it so the action works without prior setup steps.
+        if ! "$PY" -c "import yaml" >/dev/null 2>&1; then
+          echo "::group::install PyYAML"
+          "$PY" -m pip install --quiet --disable-pip-version-check PyYAML
+          echo "::endgroup::"
+        fi
         # Composite actions re-export inputs as INPUT_* already.
         ROOT="\${GITHUB_ACTION_PATH}"
         export PYTHONPATH="\${ROOT}:\${PYTHONPATH:-}"

@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import fnmatch
 import re
-from dataclasses import dataclass, field
-from typing import Iterable, Optional
+from dataclasses import dataclass
+from typing import Iterable
 
 from .diff import FileDiff, parse_diff
 from .issues import Issue
@@ -216,31 +216,13 @@ class Rule:
 RULES: dict[str, Rule] = {t[0]: Rule(*t) for t in _RULE_TUPLES}
 
 
-@dataclass
-class FindingRuleMap:
-    """Maps severity level name used externally."""
-
-
-def _expand_path_globs():
-    pass
-
-
-SEVERITY_ORDER = {"info": 0, "low": 1, "medium": 2, "high": 3}
-
 # -------------------------------------------------------------------------
 # matching engine
 # -------------------------------------------------------------------------
 
-# rule ids kept active by default; all rules active unless disabled
-ACTIVE_RULE_IDS = set(RULES.keys())
-
-# Some rules should only fire on content lines (lines that changed), which
-# parse_diff already guarantees for "add" lines. We additionally match on
-# removed lines modified to simplfy bookmarking the old file location.
+# all rules are active by default (rules.py is the single source of truth)
 def _match_single_line(rule: Rule, line_text: str) -> bool:
-    if not rule.regex.search(line_text):
-        return False
-    return True
+    return bool(rule.regex.search(line_text))
 
 
 def run_rules(files: Iterable[FileDiff], opts=None) -> list[Issue]:

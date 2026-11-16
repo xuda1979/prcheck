@@ -6,7 +6,7 @@ import json
 from io import StringIO
 from typing import Iterable
 
-from .issues import CATEGORY_LABELS, SEVERITY_ORDER, Issue, group_by_category, summary_table
+from .issues import CATEGORY_LABELS, Issue, group_by_category, summary_table
 
 _EMOJI = {"high": "🔴", "medium": "🟠", "low": "🟡", "info": "⚪"}
 

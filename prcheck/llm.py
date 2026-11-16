@@ -11,7 +11,7 @@ Enable with ``--llm-summary``; pass custom prompt/hooks by subclassing
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Iterable
 
 from .issues import Issue

@@ -5,15 +5,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
 
 from . import __version__
 from .diff import compute_stats, parse_diff
-from .issues import Issue, SEVERITY_ORDER
+from .issues import Issue, filter_issues
 from .llm import Summarizer
-from .openapi import diff_spec_text, load_spec
+from .openapi import load_spec
 from .render import render_markdown, render_sarif
 from .rules import run_rules
 
@@ -23,6 +24,36 @@ def _read(path: str | Path) -> str:
     if not p.exists():
         sys.exit(f"error: {path}: no such file")
     return p.read_text(encoding="utf-8", errors="replace")
+
+
+def fetch_pr_diff(repo: str, pr: str, gh: str = "gh") -> str:
+    """Fetch a PR's diff via the ``gh`` CLI (SPEC FR1: local/Action modes).
+
+    Runs ``gh pr diff <pr> --repo <repo>`` in subprocess and returns the
+    unified diff. Raises SystemExit with a helpful message when ``gh`` is not
+    installed or the fetch fails (bad repo/PR, auth, network).
+    """
+    if not repo and not pr:
+        sys.exit("error: --repo and --pr must be used together to fetch a PR")
+    cmd = [gh, "pr", "diff", str(pr)]
+    if repo:
+        cmd += ["--repo", repo]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120, check=False
+        )
+    except FileNotFoundError:
+        sys.exit(
+            f"error: `{gh}` not found on PATH — install the GitHub CLI "
+            "(https://cli.github.com) or pass a diff file instead (-d/--diff-file)"
+        )
+    except subprocess.TimeoutExpired:
+        sys.exit(f"error: `gh pr diff` timed out after 120s for {repo or ''}#{pr}")
+    if proc.returncode != 0:
+        hint = (proc.stderr or "").strip().splitlines()
+        detail = hint[-1] if hint else "unknown error"
+        sys.exit(f"error: failed to fetch PR {repo or ''}#{pr}: {detail}")
+    return proc.stdout
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,6 +66,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument("diff", nargs="?", help="path to PR diff file (or use -D/-d)")
     p.add_argument("-d", "--diff-file", dest="diff_file", help="path to PR diff")
+    p.add_argument(
+        "--repo",
+        help="owner/repo to fetch the PR from via the gh CLI (with --pr)",
+    )
+    p.add_argument(
+        "--pr",
+        help="PR number to fetch via the gh CLI (with --repo)",
+    )
     p.add_argument(
         "--openapi-old",
         help="old OpenAPI spec file (yaml/json) to diff from",
@@ -117,43 +156,14 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _filter_issues(
-    issues: list[Issue],
-    *,
-    security_only=False,
-    data_only=False,
-    behavior_only=False,
-    min_severity="info",
-) -> list[Issue]:
-    rank = SEVERITY_ORDER.get(min_severity, 0)
-    out = []
-    for i in issues:
-        if security_only and i.category != "security":
-            continue
-        if data_only and i.category != "data":
-            continue
-        if behavior_only and i.category != "behavior":
-            continue
-        if SEVERITY_ORDER.get(i.severity, 0) < rank:
-            continue
-        out.append(i)
-    return out
-
-
-def _load_openapi_changes(old_path: str, new_path: str) -> tuple[list[dict], dict]:
-    old_spec = load_spec(_read(old_path), old_path)
-    new_spec = load_spec(_read(new_path), new_path)
-    from .openapi import compare_specs, infer_semver
-
-    changes = compare_specs(old_spec, new_spec)
-    semver = infer_semver(old_spec.version_string, new_spec.version_string, changes)
-    return [c.to_dict() for c in changes], semver
-
-
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     diff_text = ""
-    if args.diff or args.diff_file:
+    if args.repo or args.pr:
+        if args.diff or args.diff_file:
+            sys.exit("error: --repo/--pr cannot be combined with a diff file")
+        diff_text = fetch_pr_diff(args.repo or "", args.pr or "")
+    elif args.diff or args.diff_file:
         src = args.diff_file or (args.diff if args.diff else "")
         # if the bare `diff` arg points to a file, read it
         if os.path.exists(src):
@@ -172,11 +182,14 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # NB: optional LLM summary is NOT part of the cache key (mock, costless)
     spec_texts = []
+    if (args.openapi_old is None) != (args.openapi_new is None):
+        # an OpenAPI diff needs both sides; silently emitting a diff-less
+        # report in CI hides a broken configuration
+        sys.exit("error: --openapi-old and --openapi-new must be used together")
     if args.openapi_old and args.openapi_new:
-        try:
-            spec_texts = [_read(args.openapi_old), _read(args.openapi_new)]
-        except SystemExit:
-            spec_texts = []
+        # a requested spec that cannot be read is a hard error — silently
+        # emitting a partial report in CI hides a broken configuration
+        spec_texts = [_read(args.openapi_old), _read(args.openapi_new)]
     option_tag = "|".join(
         [
             str(args.security_only),
@@ -199,7 +212,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     else:
         files = parse_diff(diff_text)
         issues = run_rules(files)
-        issues = _filter_issues(
+        issues = filter_issues(
             issues,
             security_only=args.security_only,
             data_only=args.data_only,
