@@ -173,8 +173,9 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   SQL injection, dependency changes, CORS, privilege checks, IDOR, insecure
   HTTP, OS command injection via shell, path traversal, XSS sinks, session
   cookie flags, weak/legacy crypto, insecure `random` for security values,
-  open redirects, debug mode / DEBUG-level logging, CSRF protection disabled,
-  committed private key material (PEM key blocks).
+  open redirects, SSRF (outbound fetches of request-derived URLs), debug mode
+  / DEBUG-level logging, CSRF protection disabled, committed private key
+  material (PEM key blocks).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

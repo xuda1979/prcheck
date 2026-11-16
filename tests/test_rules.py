@@ -328,6 +328,39 @@ def test_committed_private_key_material_flagged():
     assert all(i.severity == "high" for i in hits)
 
 
+def test_ssrf_fetches_of_request_derived_urls_flagged():
+    """R021-ssrf flags HTTP fetches of request input or url-ish variables."""
+    src = (
+        "resp = requests.get(request.args['url'])\n"
+        "r = requests.post(request.form['callback'], data=body)\n"
+        "out = httpx.get(request.json['target'])\n"
+        "data = urllib.request.urlopen(request.args.get('u')).read()\n"
+        "fetch = requests.get(url)\n"
+        "page = requests.get(callback_url)\n"
+        "stream = urlopen(user_url)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R021-ssrf"]
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6, 7], f"R021-ssrf mismatch: {hits}"
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_ssrf_static_and_constant_urls_quiet():
+    """R021-ssrf must not fire on literals, SCREAMING_CASE constants or url_for."""
+    src = (
+        "resp = requests.get('https://api.example.com/v1')\n"
+        "data = requests.get(API_URL)\n"
+        "r = requests.get(BASE_URL + '/users')\n"
+        "stream = urlopen('https://pypi.org/simple/')\n"
+        "page = requests.get(url_for('index'))\n"
+        "harness = requests.get(HARNESS_URL)\n"  # SCREAMING_CASE constant
+        "url = request.args.get('next')\n"  # assignment alone, no client call
+        "h = hashlib.sha256(url.encode()).hexdigest()\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R021-ssrf"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -487,7 +520,7 @@ def test_every_rule_has_test_exposure():
         "R001-a", "R001-b", "R002", "R003", "R004", "R005",
         "R006-deps", "R007-cors", "R008", "R009", "R010", "R011-session",
         "R012-cmd", "R013-path", "R014-xss", "R015-crypto", "R016-random",
-        "R017-redirect", "R018-debug", "R019-csrf", "R020-pem",
+        "R017-redirect", "R018-debug", "R019-csrf", "R020-pem", "R021-ssrf",
     }
     assert exposed <= rids
     uncovered = rids - exposed

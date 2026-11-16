@@ -281,6 +281,34 @@ _RULE_TUPLES = [
         r"(?:\s+BLOCK)?-----",
         "Private key material must not be committed; rotate and load from a secret store",
     ),
+    (
+        "R021-ssrf",
+        "security",
+        "high",
+        "Outbound HTTP fetch fed by request-derived URL (SSRF)",
+        # (A) an HTTP client call whose URL argument is request input
+        # (request.args / request.form / request.json / …) — a quoted literal
+        # fails the (?!['\"]) guard, so static URLs stay quiet.
+        r"(?i)\b(?:requests|httpx|urllib\.request|urllib2|urllib3)\.(?:get|post|put|patch|delete|head|options|request|urlopen)"
+        r"\s*\(\s*(?!['\"])([^\n)]*?request\.(?:args|values|form|headers|json|get_json\b))|"
+        # (B) same clients but with a url-ish variable/attr as the URL argument
+        # (url / target_url / callback / webhook …). The url-ish word must be the
+        # terminal identifier component, matched case-sensitively (scoped
+        # (?-i:...)) so SCREAMING_CASE constants (API_URL, BASE_URL) stay quiet;
+        # the lowercase lookahead rejects all-caps ids outright, and url_for is
+        # excluded by name. Concatenated URLs (url + '/state') still fire.
+        r"\b(?:requests|httpx|urllib\.request|urllib2|urllib3)\.(?:get|post|put|patch|delete|head|options|request)"
+        r"\s*\(\s*(?!['\"])(?!url_for)(?=[\w.]*[a-z])(?:[\w.]*?)?"
+        r"(?-i:(?:url|uri|link|endpoint|target|callback|webhook))[\w.\[\]]*"
+        r"(?:\s*\+\s*[^)\n]*?)?\s*(?:,|\))|"
+        # (C) bare urlopen( fed request input (after `from urllib.request import urlopen`)
+        r"\burlopen\s*\(\s*(?!['\"])([^\n)]*?request\.(?:args|values|form|headers|json|get_json\b))|"
+        # (D) bare urlopen( with a url-ish variable
+        r"\burlopen\s*\(\s*(?!['\"])(?!url_for)(?=[\w.]*[a-z])(?:[\w.]*?)?"
+        r"(?-i:(?:url|uri|link|endpoint|target|callback|webhook))[\w.\[\]]*"
+        r"(?:\s*\+\s*[^)\n]*?)?\s*(?:,|\))",
+        "Never fetch a URL taken from request input; validate host/protocol against an allowlist",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
