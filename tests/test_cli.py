@@ -179,3 +179,10 @@ def test_cli_repo_pr_conflicts_with_diff_file():
     r = _run(["--repo", "owner/repo", "--pr", "42", "-d", str(DIFF)])
     assert r.returncode == 1
     assert "cannot be combined" in r.stderr
+
+
+def test_cli_repo_requires_pr():
+    """A bare --repo (no --pr) is a config error, not a confusing gh call."""
+    r = _run(["--repo", "owner/repo"])
+    assert r.returncode == 1
+    assert "--repo requires --pr" in r.stderr

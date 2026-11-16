@@ -33,8 +33,8 @@ def fetch_pr_diff(repo: str, pr: str, gh: str = "gh") -> str:
     unified diff. Raises SystemExit with a helpful message when ``gh`` is not
     installed or the fetch fails (bad repo/PR, auth, network).
     """
-    if not repo and not pr:
-        sys.exit("error: --repo and --pr must be used together to fetch a PR")
+    if not pr:
+        sys.exit("error: --repo requires --pr (PR number) — pass both to fetch a PR")
     cmd = [gh, "pr", "diff", str(pr)]
     if repo:
         cmd += ["--repo", repo]
