@@ -420,6 +420,33 @@ _RULE_TUPLES = [
         r"\balgorithms?\s*[=:]\s*\[[^\]\n]*?[\"']none[\"']",
         "Always verify JWTs (never verify=False / verify_signature=False); pin algorithms, reject none",
     ),
+    (
+        "R025-pw",
+        "security",
+        "high",
+        "Password field assigned request input or a raw variable (plaintext credential storage)",
+        # Fires when a password/passwd/pwd field (terminal word, optional closing
+        # brackets; colon form deliberately NOT matched so `password: str` type
+        # annotations stay quiet) is assigned:
+        #   (A) request-derived input (request.form/json/args/… incl. .get() calls),
+        #   (B) a bare variable chain — rejected when the expression contains a
+        #       call (hashing/setter), a hash-named identifier (pw_hash, hashed,
+        #       hash_password), an env/config source (os.environ/getenv/config/
+        #       cfg/settings), or a SCREAMING_CASE constant (DB_PASSWORD). The
+        #       constant guard is scoped (?-i:[A-Z]...) so the global (?i) doesn't
+        #       fold it into matching every identifier.
+        r"(?i)\b(?:password|passwd|pwd)\b[\]\"\']*\s*=\s*"
+        r"(?!['\"]|None\b|True\b|False\b)"
+        r"(?:"
+        r"request\.(?:[a-z_]\w*\.)*[a-z_]\w*(?:\[[^)\n]*\]|"
+        r"\.(?:get|get_json|getlist|getvalue|get_data)\s*\([^)\n]*\))?"
+        r"|"
+        r"(?![\w.\[\]'\"]*\([^)\n]*\))(?![\w.\[\]'\"]*\b\w*hashe?\w*\b)"
+        r"(?![\w.\[\]'\"]*\b(?:environ|getenv|get_env|config|cfg|settings)\b)"
+        r"(?![\w.\[\]'\"]*(?-i:[A-Z][A-Z0-9_]+))[\w.\[\]'\"]*[a-z][\w.\[\]'\"]*"
+        r")",
+        "Store only a salted hash of a password (bcrypt/argon2/PBKDF2); never assign raw input or a bare variable",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

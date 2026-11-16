@@ -182,7 +182,8 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   session/client-object receivers and `aiohttp.request(method, url)`), debug mode / DEBUG-level logging, CSRF protection
   disabled, committed private key material (PEM key blocks), server-side
   template injection (SSTI), XXE (XML parsers fed request-derived data), JWT
-  verification disabled / alg=none accepted.
+  verification disabled / alg=none accepted, plaintext password storage
+  (password fields assigned raw request input or bare variables).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

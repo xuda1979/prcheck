@@ -521,6 +521,45 @@ def test_jwt_verification_kwargs_quiet():
     assert not [i for i in issues if i.rule_id == "R024-jwt"], issues
 
 
+def test_password_field_assigned_raw_input_or_variable_flagged():
+    """R025-pw flags password/passwd/pwd fields assigned request-derived input
+    or a bare variable (plaintext credential storage, CWE-256/261)."""
+    src = (
+        "user.password = request.form['password']\n"
+        "account['password'] = request.args.get('pass')\n"
+        "user.password = new_password\n"
+        "obj.passwd = creds['passwd']\n"
+        "k['password'] = cleaned['password']\n"
+        'db.execute("UPDATE users SET password = raw_pw WHERE id = ?")\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R025-pw"]
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6], f"R025-pw mismatch: {hits}"
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_password_assignment_hashing_env_literals_quiet():
+    """R025-pw must not fire on hashed assignments, env/config sources,
+    SCREAMING_CASE constants, literals, type annotations or non-field uses."""
+    src = (
+        "user.password = bcrypt.hashpw(pw.encode(), salt).decode()\n"
+        "user.password = generate_password_hash(pw)\n"
+        "password = db.Column(db.String(60))\n"
+        "user.set_password(new_password)\n"
+        "password = os.environ.get('DB_PASS', '')\n"
+        "password = DEFAULT_PASSWORD\n"
+        "user.password = pw_hash\n"
+        "user.password = hashed_password\n"
+        "password: str\n"
+        "user.password = str(request.form['pw'])\n"
+        "user.password = ''\n"
+        "confirm_password = form['password']\n"
+        "pw = 'static-value'\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R025-pw"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -685,7 +724,7 @@ def test_every_rule_has_test_exposure():
         "R006-deps", "R007-cors", "R008", "R009", "R010", "R011-session",
         "R012-cmd", "R013-path", "R014-xss", "R015-crypto", "R016-random",
         "R017-redirect", "R018-debug", "R019-csrf", "R020-pem", "R021-ssrf",
-        "R022-ssti", "R023-xxe", "R024-jwt",
+        "R022-ssti", "R023-xxe", "R024-jwt", "R025-pw",
     }
     assert exposed <= rids
     uncovered = rids - exposed
