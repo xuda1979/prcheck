@@ -594,6 +594,52 @@ def test_filestore_save_literal_and_orm_quiet():
     assert not [i for i in issues if i.rule_id == "R026-upload"], issues
 
 
+def test_mass_assignment_request_dict_flagged():
+    """R027-massassig flags request dicts fed wholesale (not field-by-field)
+    into ORM create/update family, .update* receivers, or capital constructors
+    (mass assignment, CWE-915)."""
+    src = (
+        "User.objects.create(**request.POST)\n"
+        "Account.objects.create(**request.json)\n"
+        "User.objects.filter(pk=uid).update(**request.form)\n"
+        "Entry.objects.update_or_create(pk=pk, defaults=request.POST.dict())\n"
+        "obj.update_from_dict(request.form)\n"
+        "instance.update_from_request(request.json)\n"
+        "account.update(**request.json)\n"
+        "User(**request.form.to_dict())\n"
+        "Ticket(**request.get_json())\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R027-massassig"]
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6, 7, 8, 9], f"R027-massassig mismatch: {hits}"
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_mass_assignment_fieldwise_and_unrelated_quiet():
+    """R027-massassig must not fire on explicit field assignments, literal
+    dicts, indexed request reads (not wholesale), request accessors as
+    receivers, form/serializer whitelists, or unrelated sinks."""
+    src = (
+        "User.objects.create(name=name, email=email)\n"
+        "instance.update(name='x')\n"
+        "d.update({'a': 1})\n"
+        "User.objects.filter(name=request.form['name']).delete()\n"
+        "obj.update(request.form['key'])\n"
+        "request.form.update(name='x')\n"
+        "request.args.setdefault('page', 1)\n"
+        "requests.post(url, json=request.json)\n"
+        "aiohttp.request('POST', url, json=request.form)\n"
+        "data = request.form.to_dict()\n"
+        "User(**data)\n"
+        "UserForm(request.form)\n"
+        "LoginForm(**request.json)\n"
+        "UserSerializer(request.json)\n"
+        "User.objects.create_user(**request.form)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R027-massassig"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -759,6 +805,7 @@ def test_every_rule_has_test_exposure():
         "R012-cmd", "R013-path", "R014-xss", "R015-crypto", "R016-random",
         "R017-redirect", "R018-debug", "R019-csrf", "R020-pem", "R021-ssrf",
         "R022-ssti", "R023-xxe", "R024-jwt", "R025-pw", "R026-upload",
+        "R027-massassig",
     }
     assert exposed <= rids
     uncovered = rids - exposed

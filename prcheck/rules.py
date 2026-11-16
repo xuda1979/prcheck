@@ -471,6 +471,48 @@ _RULE_TUPLES = [
         r")",
         "Validate file type/size and control the destination path; never save request files to a user-influenced or derived path",
     ),
+    (
+        "R027-massassig",
+        "security",
+        "medium",
+        "Mass assignment: request dict fed wholesale into create/update/constructor",
+        # Fires when a request-supplied dict / form payload is fed WHOLESALE (not
+        # field-by-field) into an object construction or update sink (CWE-915):
+        #   (A) Django-style Model.objects.<create|bulk_create|get_or_create|
+        #       update_or_create|update>(...) — also Model.query chains — whose
+        #       argument list contains a request dict, via **splat or as a whole
+        #       positional/keyword (defaults=request.POST.dict()).
+        #   (B) any receiver .update(...) / .update_from_dict(...) /
+        #       .update_from_request(...) fed a request dict.  Receiver must not
+        #       be request.<accessor> itself (request.form.update(...) quiet).
+        #   (C) a model-style capitalized constructor X(...) fed a request dict
+        #       wholesale.  The scoped (?-i:...) keeps case meaningful — the
+        #       global (?i) would otherwise fold [A-Z] to match lowercase
+        #       receivers like requests.post( or aiohttp.request(.  *Form /
+        #       *Serializer / *Schema class names stay quiet (whitelist-style
+        #       form population).  request.<accessor> followed by '[' or .get(
+        #       is an indexed field read, NOT a wholesale dict — stays quiet.
+        r"(?i)(?:"
+        r"\b[A-Za-z_]\w*(?::[A-Za-z_]\w+)*\.(?:objects|query)"
+        r"(?:\([^)\n]*\))?(?:\.[A-Za-z_]\w*(?:\([^)\n]*\))?)*"
+        r"\.(?:create|bulk_create|get_or_create|update_or_create|update)\s*\("
+        r"(?=[^)\n]*(?:\*\*\s*)?\brequest\.(?:POST|form|json|args|data|values|get_json|get_data)"
+        r"(?!\[|\.\s*get\b|\.\s*getlist\b|\.\s*getvalue\b)"
+        r"(?:\.\s*(?:dict|to_dict))?(?![\[.\w]))"
+        r"|"
+        r"(?<![\w.])(?!request\.)[A-Za-z_]\w*(?:\.[A-Za-z_]\w*(?:\([^)\n]*\))?)*"
+        r"\.\s*(?:update|update_from_dict|update_from_request)\s*\("
+        r"(?=[^)\n]*(?:\*\*\s*)?\brequest\.(?:POST|form|json|args|data|values|get_json|get_data)"
+        r"(?!\[|\.\s*get\b|\.\s*getlist\b|\.\s*getvalue\b)"
+        r"(?:\.\s*(?:dict|to_dict))?(?![\[.\w]))"
+        r"|"
+        r"\b(?!\w*(?:[Ff]orm|[Ss]erializer|[Ss]chema)\b)(?-i:[A-Z][A-Za-z0-9_]*)"
+        r"\s*\(\s*(?=\*\*\s*request\.|[^)\n]*(?:\*\*\s*)?\brequest\.(?:POST|form|json|args|data|values|get_json|get_data)"
+        r"(?!\[|\.\s*get\b|\.\s*getlist\b|\.\s*getvalue\b)"
+        r"(?:\.\s*(?:dict|to_dict))?(?![\[.\w]))"
+        r")",
+        "Whitelist settable fields; never bind a request dict wholesale onto a model or constructor — unexposed or privileged fields (is_admin, role) become user-settable",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
