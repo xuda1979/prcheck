@@ -149,14 +149,22 @@ _RULE_TUPLES = [
         "data",
         "low",
         "New PII field added to model/schema",
-        r"(?i)\b(?:email|phone|ssn|passport|address|credit_card|card_number|birth[_-]?date|health[_-]?data)\b",
+        r"(?i)\b(?:email|phone|ssn|passport|address|credit_card|card_number|birth[_-]?date|health[_-]?data)\b|"
+        # snake_case suffix form: user_email / customer_phone / shipping_address …
+        # must be followed by a field-context assignment, colon or EOL so function
+        # names like send_email(...) stay quiet.
+        r"_(?:email|phone|ssn|passport|address|credit_card|card_number|birth[_-]?date|health[_-]?data)"
+        r"\b(?=\s*(?:=|:)|$)",
     ),
     (
         "D002-db",
         "data",
         "medium",
         "Database schema / migration change",
-        r"(?i)\b(?:create_table|add_column|migration|ALTER\s+TABLE|DROP\s+TABLE|add_foreign_key)\b",
+        r"(?i)\b(?:create_table|add_column|migration|ALTER\s+TABLE|DROP\s+TABLE|add_foreign_key)\b|"
+        # SQL DDL keyword form:  CREATE TABLE users ( … )  /  CREATE TABLE IF NOT EXISTS …
+        # Indexes stay quiet — additive and non-destructive.
+        r"\bCREATE\s+TABLE\b",
     ),
     (
         "D003",
@@ -195,7 +203,12 @@ _RULE_TUPLES = [
         "medium",
         "HTTP status / response code change",
         r"(?i)\b(?:status_code|status|HTTP_)(?:\s*\=|\s*:\s*)\s*\d{3}\b|"
-        r"\b(?:return|raise).{0,40}\b(?:404|403|500|502)\b",
+        r"\b(?:return|raise).{0,40}\b(?:404|403|500|502)\b|"
+        # HTTPError-style exception names (raise Http404 / raise errors.NotFound? no:
+        # must carry the numeric code so generic exceptions stay quiet) and Flask
+        # abort(404) shortcuts.
+        r"\braise\s+[\w.]*(?:404|403|500|502)\b|"
+        r"\babort\s*\(\s*(?:404|403|500|502)\s*\)",
     ),
     (
         "B004",

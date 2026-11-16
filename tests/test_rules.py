@@ -90,6 +90,43 @@ def test_sensitive_logging_flags_keyword_in_arguments():
     assert hits == [1, 2], f"D003 line mismatch: {hits}"
 
 
+def test_pii_snake_case_suffix_flagged_in_field_context():
+    """D001 catches `user_email = ...` / `customer_phone: str` field forms."""
+    src = (
+        "user_email = 'a@b.c'\n"
+        "customer_phone: str\n"
+        "shipping_address = 'x'\n"
+        "send_email(addr, body)\n"  # function call: must NOT fire
+        "notify_phone(user)\n"  # ditto
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i.line for i in issues if i.rule_id == "D001"]
+    assert hits == [1, 2, 3], f"D001 suffix mismatch: {hits}"
+
+
+def test_create_table_ddl_and_raise_http_error_status_flagged():
+    """D002-bb flags raw CREATE TABLE DDL; B003 flags raise Http404 / abort(404)."""
+    src = (
+        "CREATE TABLE users (id INT);\n"
+        "CREATE TABLE IF NOT EXISTS logs (ts INT, msg TEXT);\n"
+        "CREATE INDEX idx_c ON t (c);\n"  # additive index: must NOT fire
+        "raise HttpResponseNotFound()\n"  # no numeric code: must NOT fire
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="mig.py"))
+    db = [i.line for i in issues if i.rule_id == "D002-db"]
+    assert db == [1, 2], f"D002-db line mismatch: {db}"
+
+    src = (
+        "raise Http404\n"
+        "raise django.http.Http404 from e\n"
+        "abort(404)\n"
+        "abort(500)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    st = [i.line for i in issues if i.rule_id == "B003"]
+    assert st == [1, 2, 3, 4], f"B003 line mismatch: {st}"
+
+
 def test_swallowed_exception_with_named_type_flagged():
     """B001 flags `except <Type> as e: return None`, not just bare Exception."""
     src = (
