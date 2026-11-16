@@ -513,6 +513,48 @@ _RULE_TUPLES = [
         r")",
         "Whitelist settable fields; never bind a request dict wholesale onto a model or constructor — unexposed or privileged fields (is_admin, role) become user-settable",
     ),
+    (
+        "R028-nosql",
+        "security",
+        "medium",
+        "NoSQL injection: request dict fed wholesale into a Mongo query / $where",
+        # Fires when a Mongo-family query call is fed an attacker-controlled
+        # document on a single added line (CWE-943):
+        #   (A) a pymongo-style dotted receiver ending in .find / .find_one /
+        #       find_one_and_delete / find_one_and_replace /
+        #       find_one_and_update / count_documents / distinct / aggregate
+        #       whose argument list contains a WHOLESALE request dict
+        #       (request.POST/form/json/args/data/values/get_json/get_data —
+        #       optional .dict()/.to_dict(), optional ** splat).  Indexed
+        #       reads (request.form['k'] / .get()) are field reads, not
+        #       operator-injectable whole documents — quiet.
+        #   (B) the same query family whose argument list contains a $where key
+        #       built from ANY request-derived fragment (request.args['x'] …)
+        #       — raw JS / operator injection into the query.
+        # Receivers allow dotted chains with optional subscript segments
+        # (db["users"].find).  ElementTree .find/literals, jQuery/JS .find
+        # callbacks, Django ORM .aggregate, write ops (insert_one/update_one),
+        # request accessors as receivers and standalone request reads stay quiet.
+        r"(?i)(?:"
+        # (A) query call whose args contain a wholesale request dict.
+        r"(?<![\w.])(?!request\.)[A-Za-z_]\w*(?:\s*\[[^)\n]*\]\s*)?"
+        r"(?:\.[A-Za-z_]\w*(?:\s*\[[^)\n]*\]\s*)?)*"
+        r"\.\s*(?:find_one_and_delete|find_one_and_replace|find_one_and_update|"
+        r"find_one|count_documents|distinct|aggregate|find)\s*\("
+        r"(?=[^)\n]*(?:\*\*\s*)?\brequest\.(?:POST|form|json|args|data|values|"
+        r"get_json|get_data)(?!\[|\.\s*get\b|\.\s*getlist\b|\.\s*getvalue\b)"
+        r"(?:\.\s*(?:dict|to_dict))?(?![\[.\w]))"
+        r"|"
+        # (B) query call carrying a $where built from request-derived input.
+        r"(?<![\w.])(?!request\.)[A-Za-z_]\w*(?:\s*\[[^)\n]*\]\s*)?"
+        r"(?:\.[A-Za-z_]\w*(?:\s*\[[^)\n]*\]\s*)?)*"
+        r"\.\s*(?:find_one_and_delete|find_one_and_replace|find_one_and_update|"
+        r"find_one|count_documents|distinct|aggregate|find)\s*\("
+        r"(?=[^)\n]*\$where[^)\n]*\brequest\.(?:POST|form|json|args|data|values|"
+        r"get_json|get_data))"
+        r")",
+        "Never feed a raw request dict into a Mongo-family query; sanitize/whitelist filter keys (esp. $where, $gt, $regex) or attacker-controlled operators reach the query",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

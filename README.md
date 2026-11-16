@@ -186,7 +186,9 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   (password fields assigned raw request input or bare variables), unrestricted
   file upload (request.files saved directly or .save() targets fed a filename
   attribute / request data / os.path.join with a filename), mass assignment
-  (request dicts fed wholesale into ORM create/update or constructors).
+  (request dicts fed wholesale into ORM create/update or constructors), NoSQL
+  injection (Mongo-family queries fed request dicts wholesale or `$where`
+  built from request fragments).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

@@ -640,6 +640,48 @@ def test_mass_assignment_fieldwise_and_unrelated_quiet():
     assert not [i for i in issues if i.rule_id == "R027-massassig"], issues
 
 
+def test_nosql_request_dict_query_flagged():
+    """R028-nosql flags Mongo-family query calls fed a wholesale request dict
+    or a $where built from request-derived fragments (NoSQL injection/CWE-943)."""
+    src = (
+        "db.users.find(request.json)\n"
+        "collection.find_one(request.form)\n"
+        "db.orders.find(request.get_json())\n"
+        "users.find_one_and_update({'_id': oid}, request.json)\n"
+        "db['accounts'].find(request.args)\n"
+        "db.events.count_documents(request.json)\n"
+        "db.users.distinct('role', request.form)\n"
+        "db.users.find({'$where': \"this.role == '\" + request.args['role'] + \"'\"})\n"
+        "coll.find({'$where': request.form['js']})\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R028-nosql"]
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6, 7, 8, 9], f"R028-nosql mismatch: {hits}"
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_nosql_literals_and_non_mongo_quiet():
+    """R028-nosql must not fire on literal queries, framework-bound find/
+    aggregate receivers (ElementTree, jQuery, Django ORM), write ops,
+    request accessors as receivers, or field-wise request reads."""
+    src = (
+        "db.users.find({'name': 'admin'})\n"
+        "db.users.find_one({'_id': ObjectId(oid)})\n"
+        "db.users.find(sort=[('x', 1)])\n"
+        "root.find('tag')\n"
+        "$('ul').find('li')\n"
+        "qs.aggregate(Count('id'))\n"
+        "coll.insert_one(request.json)\n"
+        "db.users.update_one({'_id': i}, {'$set': request.json})\n"
+        "request.json.find('key')\n"
+        "db.users.find_one(request.args.get('query'))\n"
+        "payload = json.loads(request.form['data'])\n"
+        "User.objects.filter(name=request.form['name'])\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R028-nosql"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -805,7 +847,7 @@ def test_every_rule_has_test_exposure():
         "R012-cmd", "R013-path", "R014-xss", "R015-crypto", "R016-random",
         "R017-redirect", "R018-debug", "R019-csrf", "R020-pem", "R021-ssrf",
         "R022-ssti", "R023-xxe", "R024-jwt", "R025-pw", "R026-upload",
-        "R027-massassig",
+        "R027-massassig", "R028-nosql",
     }
     assert exposed <= rids
     uncovered = rids - exposed
