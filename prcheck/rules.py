@@ -52,15 +52,18 @@ _RULE_TUPLES = [
         r"(?i)\b(?:api[_-]?key|secret|token|passw(?:ord|d)|password|credential|pwd|auth[_-]?key|private[_-]?key)\b"
         r"\s*(?:=|:)\s*[\"\'][A-Za-z0-9_@#$%^&*+!./\\-]{6,}[\"\']|"
         # Compound-name form:  SECRET_KEY = "…",  DJANGO_SECRET_KEY,  ACCESS_TOKEN,
-        # MYSQL_PASSWORD,  JWT_SECRET,  client_secret,  secret['secret'] = "…"
+        # MYSQL_PASSWORD,  JWT_SECRET,  client_secret,  secret['secret'] = "…",
+        # aws_access_key_id / AWS_SECRET_ACCESS_KEY / CONSUMER_KEY.
         # The keyword appears as an underscore-joined identifier component (either
         # preceded by `_` or at the very start of the identifier), with an optional
-        # key-ish suffix (base / id / hash …), then the separator. Tolerates an
-        # opening `[`/`'`/`"` between identifier and `=` for dict/config forms.
+        # key-ish suffix (base / id / hash / access_key …), then the separator.
+        # Tolerates an opening `[`/`'`/`"` between identifier and `=` for
+        # dict/config forms.
         r"(?:(?<=_)|(?<![A-Za-z0-9_]))(?:passw(?:ord|d)|password|pwd|token|secret|credential"
         r"|api[_-]?key|auth[_-]?key|private[_-]?key|signing[_-]?key|encryption[_-]?key"
+        r"|access[_-]?key|consumer[_-]?key"
         r"|jwt[_-]?secret|client[_-]?secret)"
-        r"(?:[_-](?:key(?:_base)?|base|id|token|secret|pass|passwd|hash))?[\]\"\']*[ \t]*"
+        r"(?:[_-](?:key(?:_base)?|base|id|token|secret|pass|passwd|hash|access[_-]?key))?[\]\"\']*[ \t]*"
         r"[:=]\s*[\"\'][A-Za-z0-9_@#$%^&*+!./\\-]{6,}[\"\']",
         "Possible secret committed",
     ),

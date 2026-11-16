@@ -63,6 +63,29 @@ def test_hardcoded_secret_compound_names_flagged():
     assert hits == [1, 2, 3, 4, 5, 6, 7, 8], f"R002 line mismatch: {hits}"
 
 
+def test_hardcoded_secret_cloud_credential_names_flagged():
+    """R002 catches AWS/OAuth credential names, not just key/password atoms.
+
+    aws_access_key_id / AWS_SECRET_ACCESS_KEY have the credential keyword
+    embedded with a suffix (`access_key_id`), and OAuth CONSUMER_KEY is an
+    underscore-joined key name — neither can form at the plain keyword atom.
+    """
+    src = (
+        "aws_access_key_id = 'AKIAIOSFODNN7EXAMPLE'\n"
+        "AWS_ACCESS_KEY_ID = 'AKIAI44QH8DHBEXAMPLE'\n"
+        "aws_secret_access_key = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'\n"
+        "AWS_SECRET_ACCESS_KEY = 'wJalrXUtnFEMI/K7MDENGCAFEEXAMPLEKEY'\n"
+        "CONSUMER_KEY = '2q1v7k0a9xVb3mZ8'\n"
+        "consumer_secret = 'j6f3p0s9d2h7n1'\n"
+        "access_key_id = 12345\n"                 # numeric, not a literal: must NOT fire
+        "public_key = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...'\n"  # public, not secret
+        "callback = 'https://example.com/cb'\n"    # not a credential: must NOT fire
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="keys.py"))
+    hits = [i.line for i in issues if i.rule_id == "R002"]
+    assert hits == [1, 2, 3, 4, 5, 6], f"R002 cloud mismatch: {hits}"
+
+
 def test_dependency_rule_fires_on_manifest():
     issues, _ = analyze_to_issues(FIXTURE.read_text())
     deps = [i for i in issues if i.rule_id == "R006-deps"]
