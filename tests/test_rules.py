@@ -368,7 +368,8 @@ def test_committed_private_key_material_flagged():
 
 
 def test_ssrf_fetches_of_request_derived_urls_flagged():
-    """R021-ssrf flags HTTP fetches of request input or url-ish variables."""
+    """R021-ssrf flags HTTP fetches of request input or url-ish variables,
+    including session/client-object receivers and aiohttp.request()."""
     src = (
         "resp = requests.get(request.args['url'])\n"
         "r = requests.post(request.form['callback'], data=body)\n"
@@ -377,15 +378,24 @@ def test_ssrf_fetches_of_request_derived_urls_flagged():
         "fetch = requests.get(url)\n"
         "page = requests.get(callback_url)\n"
         "stream = urlopen(user_url)\n"
+        "resp = await session.get(request.args['url'])\n"
+        "r = await client.post(request.form['url'], json=payload)\n"
+        "resp = await aiohttp.ClientSession().get(request.args['u'])\n"
+        "html = await http_client.request('GET', webhook_endpoint)\n"
+        "fetch = await httpx.AsyncClient().get(callback)\n"
+        "foo = aiohttp.request('GET', request.args['u'])\n"
+        "bar = aiohttp.request('POST', request.form['go'], data=body)\n"
+        "page = await session.get(user_url)\n"
     )
     issues, _ = analyze_to_issues(_inline_diff(src))
     hits = [i for i in issues if i.rule_id == "R021-ssrf"]
-    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6, 7], f"R021-ssrf mismatch: {hits}"
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], f"R021-ssrf mismatch: {hits}"
     assert all(i.severity == "high" for i in hits)
 
 
 def test_ssrf_static_and_constant_urls_quiet():
-    """R021-ssrf must not fire on literals, SCREAMING_CASE constants or url_for."""
+    """R021-ssrf must not fire on literals, SCREAMING_CASE constants, url_for,
+    non-HTTP receivers or plain setup lines."""
     src = (
         "resp = requests.get('https://api.example.com/v1')\n"
         "data = requests.get(API_URL)\n"
@@ -395,6 +405,14 @@ def test_ssrf_static_and_constant_urls_quiet():
         "harness = requests.get(HARNESS_URL)\n"  # SCREAMING_CASE constant
         "url = request.args.get('next')\n"  # assignment alone, no client call
         "h = hashlib.sha256(url.encode()).hexdigest()\n"
+        "resp = await session.get('https://api.example.com/v1')\n"
+        "r = await client.get(API_URL)\n"
+        "foo = aiohttp.request('GET', 'https://ex.com/x')\n"
+        "k = session_data.get(request.args['key'])\n"  # mid-word receiver
+        "v = client_id.get(request.args['id'])\n"
+        "user.get(request.args['name'])\n"
+        "s = requests.Session()\n"
+        "async with aiohttp.ClientSession() as client:\n"
     )
     issues, _ = analyze_to_issues(_inline_diff(src))
     assert not [i for i in issues if i.rule_id == "R021-ssrf"], issues

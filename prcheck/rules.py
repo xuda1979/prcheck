@@ -317,6 +317,34 @@ _RULE_TUPLES = [
         # (D) bare urlopen( with a url-ish variable
         r"\burlopen\s*\(\s*(?!['\"])(?!url_for)(?=[\w.]*[a-z])(?:[\w.]*?)?"
         r"(?-i:(?:url|uri|link|endpoint|target|callback|webhook))[\w.\[\]]*"
+        r"(?:\s*\+\s*[^)\n]*?)?\s*(?:,|\))|"
+        # (E1) session/client-object receiver (.get/.post/… on aiohttp
+        # ClientSession / httpx Client/AsyncClient / requests.Session, incl. the
+        # chained ClientSession().get form) fed request input. The receiver must
+        # END in `session|client` (empty `()` allowed) and sit immediately
+        # before the method, so session_data.get / client_id.get / cache.get
+        # stay quiet. The optional quoted method-name argument covers
+        # `client.request('GET', url)`.
+        r"\b(?:(?:[a-zA-Z][\w]*\.)*\w*(?:session|client)(?:\(\s*\))?)\s*\.\s*"
+        r"(?:get|post|put|patch|delete|head|options|request)\s*\(\s*"
+        r"(?:(?:['\"][^'\")]*['\"])\s*,?\s*)?"
+        r"(?!['\"])([^\n)]*?request\.(?:args|values|form|headers|json|get_json\b))|"
+        # (E2) session/client-object receiver fed a url-ish variable
+        r"\b(?:(?:[a-zA-Z][\w]*\.)*\w*(?:session|client)(?:\(\s*\))?)\s*\.\s*"
+        r"(?:get|post|put|patch|delete|head|options|request)\s*\(\s*"
+        r"(?:(?:['\"][^'\")]*['\"])\s*,?\s*)?"
+        r"(?!['\"])(?!url_for)(?=[\w.]*[a-z])(?:[\w.]*?)?"
+        r"(?-i:(?:url|uri|link|endpoint|target|callback|webhook))[\w.\[\]]*"
+        r"(?:\s*\+\s*[^)\n]*?)?\s*(?:,|\))|"
+        # (E3) aiohttp.request(method, url) functional form fed request input
+        r"\baiohttp\.request\s*\(\s*"
+        r"(?:(?:['\"][^'\")]*['\"])\s*,?\s*)?"
+        r"(?!['\"])([^\n)]*?request\.(?:args|values|form|headers|json|get_json\b))|"
+        # (E4) aiohttp.request(method, url) fed a url-ish variable
+        r"\baiohttp\.request\s*\(\s*"
+        r"(?:(?:['\"][^'\")]*['\"])\s*,?\s*)?"
+        r"(?!['\"])(?!url_for)(?=[\w.]*[a-z])(?:[\w.]*?)?"
+        r"(?-i:(?:url|uri|link|endpoint|target|callback|webhook))[\w.\[\]]*"
         r"(?:\s*\+\s*[^)\n]*?)?\s*(?:,|\))",
         "Never fetch a URL taken from request input; validate host/protocol against an allowlist",
     ),

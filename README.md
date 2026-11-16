@@ -178,7 +178,8 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   `dangerouslySetInnerHTML`, jQuery `.html()` setters), session cookie flags,
   weak/legacy crypto, insecure
   `random` for security values, open redirects, SSRF (outbound fetches of
-  request-derived URLs), debug mode / DEBUG-level logging, CSRF protection
+  request-derived URLs via requests/httpx/urllib/aiohttp, including
+  session/client-object receivers and `aiohttp.request(method, url)`), debug mode / DEBUG-level logging, CSRF protection
   disabled, committed private key material (PEM key blocks), server-side
   template injection (SSTI), XXE (XML parsers fed request-derived data), JWT
   verification disabled / alg=none accepted.
