@@ -197,7 +197,9 @@ _RULE_TUPLES = [
         "medium",
         "XSS sink: unescaped user/HTML string rendered",
         r"(?i)\b(?:innerHTML|outerHTML|document\.write|insertAdjacentHTML|"
-        r"lxml\.html\.fromstring|Jinja2\s*\.\s*Template|mark_safe)\s*[=(]",
+        r"lxml\.html\.fromstring|Jinja2\s*\.\s*Template|mark_safe|"
+        r"dangerouslySetInnerHTML)\s*[=(+]|"
+        r"(?:\bjQuery|\$)\s*\([^)\n]*\)\s*\.html\s*\(\s*[^\s)\n]",
         "Escape or sanitize content rendered into HTML; prefer frameworks that autoescape",
     ),
     (

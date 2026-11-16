@@ -227,6 +227,24 @@ def test_path_traversal_and_xss_sink_negatives_quiet():
     assert not [i for i in issues if i.rule_id == "R014-xss"], issues
 
 
+def test_react_and_jquery_xss_sinks_flagged():
+    """R014 flags React dangerouslySetInnerHTML and jQuery .html(v) setter sinks."""
+    src = (
+        "<div dangerouslySetInnerHTML={{__html: note}} />\n"
+        "node.dangerouslySetInnerHTML = payload\n"
+        "$('#list').html(data)\n"
+        "jQuery('#box').html(await fetchText())\n"
+        "value = el.innerHTML += more\n"
+        "safe = el.textContent = user\n"  # safe DOM prop
+        "s = df.to_html()\n"  # pandas, not a jQuery receiver
+        "$('#panel').html()\n"  # jQuery getter, no argument
+        "template = string.Template('Hello $name')\n"  # $ not a receiver
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i.line for i in issues if i.rule_id == "R014-xss"]
+    assert hits == [1, 2, 3, 4, 5], f"R014-xss mismatch: {hits}"
+
+
 def test_crypto_random_redirect_sinks_flagged():
     """R015 flags legacy crypto; R016 flags random-for-secrets; R017 flags redirects on request input."""
     src = (
@@ -573,7 +591,9 @@ _UNCOVERED_RULE_CASES = [
         "medium",
         "el.innerHTML = userHtml;\n"
         "document.write(markup)\n"
-        "return mark_safe(html)\n",
+        "return mark_safe(html)\n"
+        "node.dangerouslySetInnerHTML = payload\n"
+        "$('#list').html(data)\n",
     ),
     (
         "R015-crypto",
