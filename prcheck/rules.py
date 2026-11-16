@@ -232,6 +232,22 @@ _RULE_TUPLES = [
         r"\blevel\s*=\s*logging\.DEBUG\b|\bsetLevel\s*\(\s*logging\.DEBUG\b",
         "Disable debug mode and DEBUG-level logging before production",
     ),
+    (
+        "R019-csrf",
+        "security",
+        "medium",
+        "CSRF protection disabled / relaxed",
+        # CSRF disabled via an explicit False/0 assignment: csrf.enable(False),
+        # a *_csrf_enabled = False flag, an app.config['CSRF_ENABLED'] = False
+        # setting (Flask-WTF / Django-style), or a JSON dict value. The plain
+        # enabling call `CSRFProtect(app).init_app(app)` uses no False so it
+        # stays quiet.
+        r"(?i)\bcsrf\s*\.\s*(?:enable|protect|init|init_app)\s*\(\s*False\b|"
+        r"\w*(?:csrf|crsf)_(?:enabled|protected)\s*=\s*(?:False|0\b)|"
+        r"\b(?:app|application)\.config\s*\[\s*['\"](?:WTF_)?CSRF_(?:ENABLED|PROTECTION)['\"]\s*\]\s*=\s*(?:False|0\b)|"
+        r"['\"](?:WTF_)?CSRF_ENABLED['\"]\s*:\s*(?:False|0\b)",
+        "Keep CSRF protection enabled; only a tokenless public API may disable it",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
