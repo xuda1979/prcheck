@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 FIXTURES = Path(__file__).parent / "fixtures"
 ROOT = Path(__file__).parent.parent
 DIFF = FIXTURES / "example_pr.diff"
@@ -159,6 +161,66 @@ def test_gh_comment_mock_writes_fixture(tmp_path, monkeypatch):
     assert url == "mock://owner/repo/pull/42#comment"
     body = (tmp_path / "posted_comment.md").read_text()
     assert "owner/repo#42" in body and "- [ ] a" in body
+
+
+# --- gh CLI posting path ------------------------------------------------
+
+class _Completed:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def test_post_via_gh_cli_success(monkeypatch):
+    """`gh api -X POST` is invoked with repo/pr/body and returns the html_url."""
+    from action import gh_comment
+
+    seen = {}
+
+    def fake_run(cmd, cwd=None, capture_output=None, text=None):
+        seen["cmd"] = cmd
+        seen["cwd"] = cwd
+        return _Completed(stdout="https://github.com/owner/repo/pull/42#issuecomment-1")
+
+    monkeypatch.setattr(gh_comment.subprocess, "run", fake_run)
+    monkeypatch.setenv("GITHUB_WORKSPACE", "/workspace")
+    url = gh_comment.post_via_gh_cli("owner/repo", "42", "# body")
+    assert url == "https://github.com/owner/repo/pull/42#issuecomment-1"
+    assert seen["cmd"][:4] == ["gh", "api", "-X", "POST"]
+    assert seen["cmd"].count("/repos/owner/repo/issues/42/comments") == 1
+    assert "body=# body" in seen["cmd"]
+    assert "--jq" in seen["cmd"] and ".html_url" in seen["cmd"]
+    assert seen["cwd"] == "/workspace"
+
+
+def test_post_via_gh_cli_failure_clean(monkeypatch):
+    """A failing `gh` call raises a clear RuntimeError, not a traceback."""
+    from action import gh_comment
+
+    monkeypatch.setattr(
+        gh_comment.subprocess,
+        "run",
+        lambda *a, **k: _Completed(returncode=1, stderr="gh: not logged in"),
+    )
+    monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
+    with pytest.raises(RuntimeError, match="gh comment failed: gh: not logged in"):
+        gh_comment.post_via_gh_cli("owner/repo", "42", "# body")
+
+
+def test_gh_comment_cli_gh_gh_flag(monkeypatch, capsys):
+    """`--gh-cli` end-to-end: gh_comment.main posts via the CLI and reports."""
+    from action import gh_comment
+
+    monkeypatch.setattr(
+        gh_comment.subprocess,
+        "run",
+        lambda *a, **k: _Completed(stdout="https://x/comment/7"),
+    )
+    monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
+    rc = gh_comment.main(["--gh-cli", "--repo", "owner/repo", "--pr", "7", "--body", "hi"])
+    assert rc == 0
+    assert "comment posted: https://x/comment/7" in capsys.readouterr().out
 
 
 # --- inline review comments (task #11) ---------------------------------
