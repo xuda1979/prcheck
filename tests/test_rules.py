@@ -733,6 +733,53 @@ def test_ldap_injection_literals_and_generic_search_quiet():
     assert not [i for i in issues if i.rule_id == "R029-ldap"], issues
 
 
+def test_xpath_injection_query_flagged():
+    """R030-xpath flags XPath query calls fed request-derived input (CWE-643):
+    lxml element .xpath() on any receiver and compiled XPath/E/etree.XPath
+    constructors. Indexed reads and .get() ARE payloads here."""
+    src = (
+        "root.xpath(request.form['query'])\n"
+        "tree.xpath(\"//user[name='\" + request.args.get('name') + \"']\")\n"
+        "doc.xpath(request.data)\n"
+        "parser.parse(f).xpath(request.get_json()['q'])\n"
+        "resume.xpath(request.headers.get('X-Query'))\n"
+        "conn.xpath(request.json)\n"
+        "XPath(request.form['expr'])\n"
+        "etree.XPath(request.args.get('q'))\n"
+        "lxml.etree.XPath(request.get_json()['path'])\n"
+        "etree.XPathEvaluator(request.data)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R030-xpath"]
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], f"R030-xpath mismatch: {hits}"
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_xpath_literals_and_unrelated_quiet():
+    """R030-xpath must not fire on literal/non-request queries, SCREAMING
+    constants or bare variables, ElementTree find/findall, browser $x/Selenium
+    By.XPATH, or standalone request reads."""
+    src = (
+        "root.xpath('//book/title')\n"
+        "tree.xpath(\"//user[name='jdoe']\")\n"
+        "root.xpath(QUERY)\n"
+        "root.xpath(user_query)\n"
+        "XPath('//user')\n"
+        "etree.XPath('/titles')\n"
+        "el.find('tag')\n"
+        "el.findall('.//item')\n"
+        "el.iter()\n"
+        "request.form.get('q')\n"
+        "q = request.args.get('q')\n"
+        "logger.info('xpath=%s', request.form['q'])\n"
+        "$x('//div')\n"
+        "wait.until(EC.presence_of_element_located((By.XPATH, '//div')))\n"
+        "result = XPathEvaluator(expr_literal)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R030-xpath"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -898,7 +945,7 @@ def test_every_rule_has_test_exposure():
         "R012-cmd", "R013-path", "R014-xss", "R015-crypto", "R016-random",
         "R017-redirect", "R018-debug", "R019-csrf", "R020-pem", "R021-ssrf",
         "R022-ssti", "R023-xxe", "R024-jwt", "R025-pw", "R026-upload",
-        "R027-massassig", "R028-nosql", "R029-ldap",
+        "R027-massassig", "R028-nosql", "R029-ldap", "R030-xpath",
     }
     assert exposed <= rids
     uncovered = rids - exposed

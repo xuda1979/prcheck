@@ -592,6 +592,41 @@ _RULE_TUPLES = [
         r")",
         "LDAP search filters/dns built from request input allow filter injection; escape with ldap.filter.escape_filter_chars / ldap.dn.escape_dn_chars (python-ldap) or ldap3.utils.conv escape helpers",
     ),
+    (
+        "R030-xpath",
+        "security",
+        "medium",
+        "XPath injection: request-derived input in an XPath query",
+        # Fires when an XPath query call is fed request-derived input as its
+        # query expression on a single added line (CWE-643):
+        #   (A) an lxml-style element .xpath(...) method call with any receiver
+        #       (dotted chains may include intermediate call segments, e.g.
+        #       parser.parse(f).xpath) whose argument list contains a
+        #       request-derived token (request.POST/form/json/args/data/values/
+        #       cookies/headers/get_json/get_data); indexed reads and .get()
+        #       ARE injection payloads here — a predicate string built from a
+        #       field read is exactly the vulnerable case.
+        #   (B) a compiled XPath expression constructor — (lxml.)etree.XPath /
+        #       XPathEvaluator — whose argument list contains a request-derived
+        #       token.
+        # Literal / non-request queries (SCREAMING constants, bare variables),
+        # standalone request reads, ElementTree find/findall, browser
+        # $x(console) and Selenium By.XPATH lookups stay quiet.
+        r"(?i)(?:"
+        # (A) lxml-style element .xpath() fed a request-derived query.
+        r"(?<![\w.])(?!request\.)[A-Za-z_]\w*"
+        r"(?:\.[A-Za-z_]\w*(?:\s*\([^)\n]*\))?)*"
+        r"\.\s*xpath\s*\("
+        r"(?=[^)\n]*\brequest\.(?:POST|form|json|args|data|values|cookies|headers|"
+        r"get_json|get_data))"
+        r"|"
+        # (B) compiled XPath expression constructor fed a request-derived query.
+        r"(?<![\w.])(?:(?:lxml\.)?etree\.)?XPath(?:Evaluator)?\s*\("
+        r"(?=[^)\n]*\brequest\.(?:POST|form|json|args|data|values|cookies|headers|"
+        r"get_json|get_data))"
+        r")",
+        "XPath expressions built from request input allow predicate injection; whitelist/validate the query or bind values via the safe API (e.g. variables dict) instead of concatenating input",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
