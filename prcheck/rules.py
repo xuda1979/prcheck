@@ -362,6 +362,25 @@ _RULE_TUPLES = [
         r"(?=[\w.]*[a-z])(?:[\w.]*?)?(?-i:xml)[\w.\[\]]*(?:\s*,|\s*\)))",
         "Parse untrusted XML with a hardened parser (defusedxml); disable external entity expansion",
     ),
+    (
+        "R024-jwt",
+        "security",
+        "medium",
+        "JWT signature verification disabled or alg=none accepted",
+        # (A1) jwt.decode/verify(..., verify=False) turns off the signature check.
+        # (A2) jwt.decode/verify(..., options={'verify_signature': False}) — the
+        #      dict key may be quoted. A bare `options` dict name is not itself
+        #      the flag, so it must appear inline inside the jwt call.
+        r"(?i)\bjwt\.(?:decode|verify)\s*\([^\n)]*\bverify\s*=\s*False|"
+        r"\bjwt\.(?:decode|verify)\s*\([^\n)]*?\boptions\s*=\s*\{"
+        r"[^}\n]*?[\"']?verify_signature[\"']?\s*:\s*False|"
+        # (A3) jwt.decode/verify(..., algorithms=['none']) or algorithms='none'
+        #      accepts unsigned tokens (CWE-347 / alg-confusion root cause).
+        r"\bjwt\.(?:decode|verify)\s*\([^\n)*]*algorithms?\s*=\s*(?:\[[^\]\n]*?|[\"'])[\"']none[\"']|"
+        # (A4) standalone algorithms=['none'] declaration (line-level catch).
+        r"\balgorithms?\s*[=:]\s*\[[^\]\n]*?[\"']none[\"']",
+        "Always verify JWTs (never verify=False / verify_signature=False); pin algorithms, reject none",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

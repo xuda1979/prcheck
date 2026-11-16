@@ -176,7 +176,8 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   open redirects, SSRF (outbound fetches of request-derived URLs), debug mode
   / DEBUG-level logging, CSRF protection disabled, committed private key
   material (PEM key blocks), server-side template injection (SSTI), XXE
-  (XML parsers fed request-derived data).
+  (XML parsers fed request-derived data), JWT verification disabled /
+  alg=none accepted.
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

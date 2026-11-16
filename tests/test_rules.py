@@ -430,6 +430,40 @@ def test_xxe_static_and_defusedxml_quiet():
     assert not [i for i in issues if i.rule_id == "R023-xxe"], issues
 
 
+def test_jwt_verification_disabled_or_none_alg_flagged():
+    """R024-jwt flags verify=False, options verify_signature False and
+    alg=none acceptance."""
+    src = (
+        "claims = jwt.decode(token, SECRET, verify=False)\n"
+        "data = jwt.decode(request.args['t'], verify=False)\n"
+        "claims = jwt.decode(t, key, options={'verify_signature': False})\n"
+        "ok = jwt.verify(tok, KEY, options={'verify_signature': False})\n"
+        "claims = jwt.decode(tok, key, algorithms=['none'])\n"
+        "data = jwt.decode(request.json['t'], algorithms=['none'])\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R024-jwt"]
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6], f"R024-jwt mismatch: {hits}"
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_jwt_verification_kwargs_quiet():
+    """R024-jwt must not fire on safe verify=True, pinned algorithms, encode,
+    header inspection or non-bool flags."""
+    src = (
+        "claims = jwt.decode(token, SECRET, algorithms=['HS256'])\n"
+        "data = jwt.decode(tok, key, verify=True)\n"
+        "claims = jwt.decode(token, SECRET)\n"
+        "jwt.encode(payload, KEY, algorithm='HS256')\n"
+        "cfg = jwt.get_unverified_header(token)\n"
+        "opts = {'verify_signature': True}\n"
+        "token = jwt.decode(t, key, verify=VERIFY_FLAG)\n"
+        "algorithms = ['HS256', 'RS256']\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R024-jwt"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -590,7 +624,7 @@ def test_every_rule_has_test_exposure():
         "R006-deps", "R007-cors", "R008", "R009", "R010", "R011-session",
         "R012-cmd", "R013-path", "R014-xss", "R015-crypto", "R016-random",
         "R017-redirect", "R018-debug", "R019-csrf", "R020-pem", "R021-ssrf",
-        "R022-ssti", "R023-xxe",
+        "R022-ssti", "R023-xxe", "R024-jwt",
     }
     assert exposed <= rids
     uncovered = rids - exposed
