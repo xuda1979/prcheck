@@ -174,6 +174,47 @@ _RULE_TUPLES = [
         r"lxml\.html\.fromstring|Jinja2\s*\.\s*Template|mark_safe)\s*[=(]",
         "Escape or sanitize content rendered into HTML; prefer frameworks that autoescape",
     ),
+    (
+        "R015-crypto",
+        "security",
+        "medium",
+        "Weak / legacy crypto primitive used",
+        # hashlib.md5 / hashlib.sha1 / bare md5( / sha1( as one-liner calls, and
+        # DES/RC4 cipher references. Used for checksums alone these are benign,
+        # but PR reviewers should confirm no security context (signatures, PW
+        # hashing, key derivation) relies on them.
+        r"(?i)\b(?:hashlib\.)?(?:md5|sha1)\s*\(|"
+        r"\b(?:DES|RC4|ARC4)\b|\bCrypto\.Cipher\.(?:DES|ARC4)\b",
+        "MD5/SHA1/DES/RC4 are legacy; use SHA-2/3 or a KDF (bcrypt, argon2, PBKDF2)",
+    ),
+    (
+        "R016-random",
+        "security",
+        "medium",
+        "random module used to generate a security value",
+        # A security-value keyword (token / password / salt …) and a random.* call
+        # on the same line, in either order. `random.randint(x)` used for plain
+        # logic (no keyword) and the safe `secrets` module stay quiet.
+        r"(?i)\b(?:password|passwd|pw|token|secret|api[_-]?key|otp|nonce|salt|verif)\b[^\n]*"
+        r"\brandom\.(?:random|randint|choice|choices|getrandbits|shuffle|sample)\s*\(|"
+        r"\brandom\.(?:random|randint|choice|choices|getrandbits|shuffle|sample)\s*\([^\n]*"
+        r"\b(?:password|passwd|pw|token|secret|api[_-]?key|otp|nonce|salt|verif)\b",
+        "Use the cryptographically secure secrets module instead of random",
+    ),
+    (
+        "R017-redirect",
+        "security",
+        "medium",
+        "Open redirect: redirect target derived from request input",
+        # redirect( ... ) whose argument is not a quoted literal or url_for() and
+        # mentions request input or a redirect-target name. Only matches one line.
+        # request.url (the current request's own URL) is excluded - not attacker
+        # controlled - via the (?<!request\.) lookbehind on the url keyword.
+        r"(?i)\bredirect\s*\(\s*(?!['\"])(?!url_for)[^\n)]*"
+        r"(?:request\.(?:args|values|form|headers)|\bnext\b|next_url|return_url|"
+        r"redirect_to|(?<!request\.)\burl\b)",
+        "Whitelist redirect targets; never trust a full URL from the client",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

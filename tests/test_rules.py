@@ -157,6 +157,39 @@ def test_path_traversal_and_xss_sink_negatives_quiet():
     assert not [i for i in issues if i.rule_id == "R014-xss"], issues
 
 
+def test_crypto_random_redirect_sinks_flagged():
+    """R015 flags legacy crypto; R016 flags random-for-secrets; R017 flags redirects on request input."""
+    src = (
+        "h = hashlib.md5(data).hexdigest()\n"
+        "sig = sha1(payload.encode()).digest()\n"
+        "token = ''.join(random.choice(chars) for _ in range(32))\n"
+        "return redirect(request.args.get('next'))\n"
+        "return redirect(url)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    crypto = [i.line for i in issues if i.rule_id == "R015-crypto"]
+    assert crypto == [1, 2], f"R015-crypto mismatch: {crypto}"
+    rand = [i.line for i in issues if i.rule_id == "R016-random"]
+    assert rand == [3], f"R016-random mismatch: {rand}"
+    redir = [i.line for i in issues if i.rule_id == "R017-redirect"]
+    assert redir == [4, 5], f"R017-redirect mismatch: {redir}"
+
+
+def test_crypto_random_redirect_negatives_quiet():
+    """sha256, secrets, plain random.randint and benign redirects must not fire."""
+    src = (
+        "h = hashlib.sha256(data).hexdigest()\n"
+        "token = secrets.token_hex(16)\n"
+        "i = random.randint(0, 10)\n"
+        "return redirect('/dashboard')\n"
+        "return redirect(url_for('index'))\n"
+        "return redirect(request.url)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    for rid in ("R015-crypto", "R016-random", "R017-redirect"):
+        assert not [i for i in issues if i.rule_id == rid], (rid, issues)
+
+
 def test_swallowed_exception_with_named_type_flagged():
     """B001 flags `except <Type> as e: return None`, not just bare Exception."""
     src = (
@@ -281,6 +314,29 @@ _UNCOVERED_RULE_CASES = [
         "document.write(markup)\n"
         "return mark_safe(html)\n",
     ),
+    (
+        "R015-crypto",
+        "security",
+        "medium",
+        "h = hashlib.md5(data).hexdigest()\n"
+        "sig = sha1(payload.encode()).digest()\n"
+        "from Crypto.Cipher import DES\n",
+    ),
+    (
+        "R016-random",
+        "security",
+        "medium",
+        "token = ''.join(random.choice(chars) for _ in range(32))\n"
+        "salt = random.getrandbits(64)\n",
+    ),
+    (
+        "R017-redirect",
+        "security",
+        "medium",
+        "return redirect(request.args.get('next'))\n"
+        "return redirect(url)\n"
+        "return redirect(next_url)\n",
+    ),
 ]
 
 
@@ -311,7 +367,8 @@ def test_every_rule_has_test_exposure():
         "D001", "D002-db", "D003", "D004",
         "R001-a", "R001-b", "R002", "R003", "R004", "R005",
         "R006-deps", "R007-cors", "R008", "R009", "R010", "R011-session",
-        "R012-cmd", "R013-path", "R014-xss",
+        "R012-cmd", "R013-path", "R014-xss", "R015-crypto", "R016-random",
+        "R017-redirect",
     }
     assert exposed <= rids
     uncovered = rids - exposed

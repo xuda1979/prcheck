@@ -172,7 +172,8 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
 - **Security** — no-auth routes, hardcoded secrets, TLS disable, eval/exec,
   SQL injection, dependency changes, CORS, privilege checks, IDOR, insecure
   HTTP, OS command injection via shell, path traversal, XSS sinks, session
-  cookie flags.
+  cookie flags, weak/legacy crypto, insecure `random` for security values,
+  open redirects.
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
