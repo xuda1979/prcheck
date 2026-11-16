@@ -15,6 +15,8 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 
@@ -50,8 +52,6 @@ def post_via_gh_cli(repo: str, pr_number: str, body: str, *, draft: bool = False
 
 def post_via_http(repo: str, pr_number: str, body: str) -> str:
     """Post a comment directly through https://api.github.com."""
-    import urllib.request
-
     api = f"{_api_base()}/repos/{repo}/issues/{pr_number}/comments"
     req = urllib.request.Request(
         api,
@@ -66,6 +66,125 @@ def post_via_http(repo: str, pr_number: str, body: str) -> str:
     with urllib.request.urlopen(req) as resp:  # noqa: S310 (explicit GitHub API)
         payload = json.loads(resp.read().decode("utf-8"))
         return payload.get("html_url", api)
+
+
+# Marker so inline comments posted by this tool can be recognized and skipped
+# on re-runs (idempotency), instead of piling duplicate comments onto a line.
+_INLINE_MARKER = "<!-- prcheck-inline -->"
+
+
+def _default_api_call(
+    method: str, url: str, data: dict | None = None
+) -> dict:
+    """Shared urllib call to the GitHub API returning parsed JSON."""
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(data).encode("utf-8") if data is not None else None,
+        headers={
+            "Authorization": f"token {_token()}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "prcheck-action",
+        },
+        method=method,
+    )
+    with urllib.request.urlopen(req) as resp:  # noqa: S310 (explicit GitHub API)
+        raw = resp.read().decode("utf-8")
+        return json.loads(raw) if raw else {}
+
+
+def review_comments_for_issues(issues: list) -> list[dict]:
+    """Turn engine issues into inline comment payloads.
+
+    One comment per (path, line), with every finding at that location merged
+    into the body (deduplicated). Only high/medium findings carry a snippet;
+    low/info findings are listed without it so the comment stays readable.
+    """
+    by_loc: dict[tuple[str, int], list] = {}
+    for issue in issues:
+        by_loc.setdefault((issue.path, issue.line), []).append(issue)
+
+    out: list[dict] = []
+    for (path, line), items in sorted(by_loc.items()):
+        lines = []
+        for item in sorted(items, key=lambda i: i.severity, reverse=True):
+            snippet = (item.snippet or "").strip()
+            if item.severity in ("medium", "high") and snippet:
+                lines.append(f"- **[{item.rule_id}] {item.summary}** `{snippet[:80]}`")
+            else:
+                lines.append(f"- [{item.rule_id}] {item.summary}")
+        out.append(
+            {
+                "body": _INLINE_MARKER + "\n\n" + "\n".join(lines),
+                "path": path,
+                "line": line,
+            }
+        )
+    return out
+
+
+def list_review_comment_bodies(
+    repo: str, pr_number: str, commit_id: str
+) -> set[str]:
+    """Return the marker-prefixed bodies of review comments already posted.
+
+    Used to skip re-posting a finding that a previous run (same marker) already
+    anchored at a line. Returns an empty set when the list call fails so the
+    caller still posts (best-effort idempotency, never a hard failure).
+    """
+    marker = _INLINE_MARKER + "\n\n"
+    url = f"{_api_base()}/repos/{repo}/pulls/{pr_number}/comments"
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"token {_token()}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "prcheck-action",
+            },
+            method="GET",
+        )
+        with urllib.request.urlopen(req) as resp:  # noqa: S310
+            payload = json.loads(resp.read().decode("utf-8") or "[]")
+        return {
+            c["body"]
+            for c in payload
+            if c.get("body", "").startswith(marker)
+        }
+    except urllib.error.HTTPError:
+        return set()
+
+
+def post_review_comments(
+    repo: str, pr_number: str, commit_id: str, comments: list[dict]
+) -> list[str]:
+    """Post inline review comments, skipping ones already on the PR.
+
+    Each comment is posted independently so one failing API call (e.g. a
+    downstream ``Not Found`` on a moved line) doesn't block the rest.
+    Returns the posted HTML URLs.
+    """
+    posted: list[str] = []
+    existing = list_review_comment_bodies(repo, pr_number, commit_id)
+    for comment in comments:
+        if comment["body"] in existing:
+            continue
+        url = f"{_api_base()}/repos/{repo}/pulls/{pr_number}/comments"
+        try:
+            payload = _default_api_call(
+                "POST", url, {
+                    "body": comment["body"],
+                    "commit_id": commit_id,
+                    "path": comment["path"],
+                    "line": comment["line"],
+                }
+            )
+        except urllib.error.HTTPError as e:
+            print(f"[prcheck] inline comment skipped for "
+                  f"{comment['path']}:{comment['line']}: HTTP {e.code} "
+                  f"{e.reason}", file=sys.stderr)
+            continue
+        posted.append(payload.get("html_url", url))
+    return posted
 
 
 def _ghmock_dir() -> Path:

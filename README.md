@@ -23,7 +23,9 @@ the default path (an off-by-default mock summarizer exists).
 - **CLI filters**: `--security-only`, `--behavior-only`, `--data-only`, `--min-severity`.
 - **Merge gate**: `--require-high-ok` fails the build when High findings are
   unresolved.
-- **GitHub Action** for CI + optional `gh` PR comment posting.
+- **GitHub Action** for CI + optional `gh` PR comment posting, plus
+  **inline review comments** anchoring high/medium findings to the changed
+  lines (idempotent on re-runs).
 - Fixture-driven tests; no `gh` CLI needed at test time.
 
 ## Install
@@ -102,6 +104,12 @@ into `tests/ghmock/posted_comment.md`:
 python action/gh_comment.py --repo owner/repo --pr 12 --body-file report.md --mock
 ```
 
+Inline review comments: with `--post-inline-comment=true` the Action turns
+high/medium findings into GitHub review comments anchored to the added lines
+(`path` + `line`). Findings at the same location are merged into one comment;
+a `<!-- prcheck-inline -->` marker makes re-runs idempotent (already-posted
+comments are skipped, so the PR doesn't accumulate duplicates).
+
 ### 6. As a GitHub Action
 
 See `.github/workflows/prcheck.yml`. The workflow:
@@ -111,6 +119,11 @@ See `.github/workflows/prcheck.yml`. The workflow:
 3. compares `BASE_SPEC` vs `HEAD_SPEC`,
 4. runs `prcheck`, posts the Markdown as a PR comment with `gh`, and exits 1
    on `--require-high-ok` gate.
+
+Action inputs include `post-comment` (post the Markdown report as a PR
+comment) and `post-inline-comment` (also anchor per-finding review comments to
+the added lines). Set `permissions: { pull-requests: write }` in the workflow
+so the ephemeral `GITHUB_TOKEN` can post both.
 
 ### 7. Webhook bridge (phase P3, bonus)
 

@@ -54,6 +54,13 @@ inputs:
       pull-requests: write; the ephemeral default token works if set.
     required: false
     default: "false"
+  post-inline-comment:
+    description: >
+      Post high/medium findings as inline review comments anchored to the
+      changed lines. Requires POST_COMMENT semantics: a GITHUB_TOKEN with
+      pull-requests: write and a detected PR + head commit.
+    required: false
+    default: "false"
 outputs:
   report-path:
     description: "Path to the generated Markdown report."

@@ -37,6 +37,21 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on", "y")
 
 
+def _discover_commit_id() -> str | None:
+    """The head commit SHA review comments must be anchored to."""
+    sha = os.environ.get("GITHUB_SHA")
+    if sha:
+        return sha
+    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+    if event_path and Path(event_path).exists():
+        try:
+            data = json.loads(Path(event_path).read_text(encoding="utf-8"))
+            return (data.get("pull_request") or {}).get("head", {}).get("sha")
+        except Exception:
+            return None
+    return None
+
+
 def _discover_pr_number() -> str | None:
     n = os.environ.get("PR_NUMBER")
     if n:
@@ -178,6 +193,25 @@ def main() -> int:
         else:
             sys.stderr.write("prcheck-action: POST_COMMENT=true but no PR is "
                              "detected (GITHUB_EVENT_PATH / PR_NUMBER)\n")
+
+    # optional inline review comments anchored to added diff lines
+    if _env_flag("INPUT_POST_INLINE_COMMENT") and issues:
+        pr = _discover_pr_number()
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        commit_id = _discover_commit_id()
+        if pr and repo and commit_id:
+            from action.gh_comment import post_review_comments, review_comments_for_issues
+
+            comments = review_comments_for_issues(issues)
+            try:
+                urls = post_review_comments(repo, pr, commit_id, comments)
+                print(f"prcheck-action: posted {len(urls)} inline comments")
+            except Exception as e:  # pragma: no cover
+                sys.stderr.write(f"prcheck-action: inline comments failed: {e}\n")
+        else:
+            sys.stderr.write("prcheck-action: POST_INLINE_COMMENT=true but "
+                             "PR/commit not detected (GITHUB_EVENT_PATH, "
+                             "GITHUB_SHA or PR_NUMBER)\n")
 
     return 1 if blocked else 0
 

@@ -103,6 +103,27 @@ def test_run_action_invalid_spec_clean_error(tmp_path):
     assert "Traceback" not in res.stderr
 
 
+def test_run_action_inline_comments_off_by_default(tmp_path):
+    """POST_INLINE_COMMENT=true without a PR is a clean no-op warning."""
+    env = {
+        "INPUT_DIFF": DIFF.read_text(),
+        "INPUT_OUTPUT_DIR": str(tmp_path / "out"),
+        "INPUT_REQUIRE_HIGH_OK": "false",
+        "INPUT_POST_INLINE_COMMENT": "true",
+        "PYTHONPATH": str(ROOT),
+        "PATH": os.environ["PATH"],
+    }
+    res = subprocess.run(
+        [sys.executable, str(ROOT / "action" / "run_action.py")],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0
+    assert "POST_INLINE_COMMENT=true but" in res.stderr
+    assert "Traceback" not in res.stderr
+
+
 def test_gh_comment_mock(tmp_path, capsys):
     """AC6: gh simulation — the fixture comment body is loadable offline."""
     script = ROOT / "action" / "gh_comment.py"
@@ -138,3 +159,119 @@ def test_gh_comment_mock_writes_fixture(tmp_path, monkeypatch):
     assert url == "mock://owner/repo/pull/42#comment"
     body = (tmp_path / "posted_comment.md").read_text()
     assert "owner/repo#42" in body and "- [ ] a" in body
+
+
+# --- inline review comments (task #11) ---------------------------------
+
+def _mk_issue(rule_id, severity, path, line, summary, snippet=""):
+    from prcheck.issues import Issue
+    return Issue(rule_id, "security", severity, summary, path, line, snippet)
+
+
+def test_review_comments_merge_by_location():
+    """Findings at the same path:line merge into one comment body."""
+    from action.gh_comment import review_comments_for_issues
+
+    issues = [
+        _mk_issue("R002", "high", "src/a.py", 10, "hardcoded secret", "key='x'"),
+        _mk_issue("R003", "low", "src/a.py", 10, "minor", ""),
+        _mk_issue("D001", "medium", "src/b.py", 3, "pii log", "log(user.email)"),
+    ]
+    comments = review_comments_for_issues(issues)
+    assert len(comments) == 2
+    by_path = {c["path"]: c for c in comments}
+    assert by_path["src/a.py"]["line"] == 10
+    body = by_path["src/a.py"]["body"]
+    assert "<!-- prcheck-inline -->" in body
+    assert "R002" in body and "R003" in body       # merged
+    assert "key='x'" in body                        # high snippet present
+    assert by_path["src/b.py"]["body"].startswith("<!-- prcheck-inline -->")
+
+
+def test_review_comments_low_info_no_snippet():
+    """Low/info findings are listed without a snippet blurb."""
+    from action.gh_comment import review_comments_for_issues
+
+    comments = review_comments_for_issues(
+        [_mk_issue("B001", "info", "x.py", 1, "minor note", "some snippet text")]
+    )
+    assert "some snippet text" not in comments[0]["body"]
+
+
+def test_post_review_comments_skips_existing_and_posts(monkeypatch):
+    """Idempotency: same marker body is skipped; new ones are POSTed."""
+    import urllib.error
+
+    from action import gh_comment
+
+    posted = []
+
+    def fake_urlopen(req, timeout=None):
+        started = {c["body"] for c in _EXISTING_COMMENTS}
+        if req.method == "GET":
+            return FakeResp(json.dumps(_EXISTING_COMMENTS).encode())
+        # POST
+        payload = json.loads(req.data.decode())
+        posted.append({"path": payload["path"], "line": payload["line"],
+                       "body": payload["body"][:20]})
+        return FakeResp(json.dumps({"html_url": f"https://x#{len(posted)}"}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    existing_body = (gh_comment._INLINE_MARKER + "\n\n- [R1] old")
+    _EXISTING_COMMENTS[:] = [{"body": existing_body}]
+    new_body = gh_comment._INLINE_MARKER + "\n\n- [R2] fresh"
+    urls = gh_comment.post_review_comments(
+        "owner/repo", "7", "abc123",
+        [{"body": new_body, "path": "a.py", "line": 1},
+         {"body": existing_body, "path": "b.py", "line": 2}],
+    )
+    assert len(urls) == 1
+    assert posted[0]["path"] == "a.py" and posted[0]["line"] == 1
+
+
+def test_post_review_comments_tolerates_http_errors(monkeypatch, capsys):
+    """One failing comment doesn't abort posting the rest."""
+    import urllib.error
+
+    from action import gh_comment
+
+    fail_after = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        if req.method == "GET":
+            return FakeResp(b"[]")
+        if fail_after["n"] == 0:
+            fail_after["n"] += 1
+            raise urllib.error.HTTPError(
+                "http://x", 422, "Unprocessable", None, None
+            )
+        return FakeResp(b'{"html_url": "https://x/ok"}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    urls = gh_comment.post_review_comments(
+        "owner/repo", "7", "abc123",
+        [{"body": gh_comment._INLINE_MARKER + "\nb1", "path": "a.py", "line": 1},
+         {"body": gh_comment._INLINE_MARKER + "\nb2", "path": "a.py", "line": 2}],
+    )
+    assert urls == ["https://x/ok"]
+    assert "HTTP 422" in capsys.readouterr().err
+
+
+class FakeResp:
+    def __init__(self, body):
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self._body
+
+
+_EXISTING_COMMENTS: list = []
