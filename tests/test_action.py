@@ -78,6 +78,31 @@ def test_run_action_range_diff_derive(tmp_path, monkeypatch):
     assert "No-auth / new public route detected" in md
 
 
+def test_run_action_invalid_spec_clean_error(tmp_path):
+    """A malformed OpenAPI spec fails the action cleanly (no traceback)."""
+    bad = tmp_path / "bad.yaml"
+    bad.write_text('openapi: 3.0.0\ninfo:\n  title: t\n  version: "1"\npaths: [oops]\n')
+    env = {
+        "INPUT_DIFF": DIFF.read_text(),
+        "INPUT_BASE_SPEC": str(bad),
+        "INPUT_HEAD_SPEC": str(V2),
+        "INPUT_OUTPUT_DIR": str(tmp_path / "out"),
+        "INPUT_REQUIRE_HIGH_OK": "false",
+        "INPUT_POST_COMMENT": "false",
+        "PYTHONPATH": str(ROOT),
+        "PATH": os.environ["PATH"],
+    }
+    res = subprocess.run(
+        [sys.executable, str(ROOT / "action" / "run_action.py")],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 2, res.stdout + res.stderr
+    assert "'paths' must be a mapping" in res.stderr
+    assert "Traceback" not in res.stderr
+
+
 def test_gh_comment_mock(tmp_path, capsys):
     """AC6: gh simulation — the fixture comment body is loadable offline."""
     script = ROOT / "action" / "gh_comment.py"

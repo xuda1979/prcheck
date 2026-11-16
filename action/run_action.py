@@ -107,17 +107,23 @@ def main() -> int:
                 f"({base_path}, {head_path}); skipping changelog\n"
             )
 
-    result = run_analysis(
-        diff_text,
-        base_spec_text=base_spec_text,
-        new_spec_text=new_spec_text,
-        base_spec_name=str(base_spec),
-        new_spec_name=str(head_spec),
-        security_only=_env_flag("INPUT_SECURITY_ONLY"),
-        data_only=_env_flag("INPUT_DATA_ONLY"),
-        behavior_only=_env_flag("INPUT_BEHAVIOR_ONLY"),
-        min_severity=os.environ.get("INPUT_MIN_SEVERITY", "info"),
-    )
+    try:
+        result = run_analysis(
+            diff_text,
+            base_spec_text=base_spec_text,
+            new_spec_text=new_spec_text,
+            base_spec_name=str(base_spec),
+            new_spec_name=str(head_spec),
+            security_only=_env_flag("INPUT_SECURITY_ONLY"),
+            data_only=_env_flag("INPUT_DATA_ONLY"),
+            behavior_only=_env_flag("INPUT_BEHAVIOR_ONLY"),
+            min_severity=os.environ.get("INPUT_MIN_SEVERITY", "info"),
+        )
+    except ValueError as e:
+        # malformed/invalid OpenAPI spec — fail loudly but cleanly; a
+        # traceback in a CI step hides the real configuration problem
+        sys.stderr.write(f"prcheck-action: error: {e}\n")
+        return 2
     issues = result.issues
     stat = result.stat
     openapi_changes = result.openapi_changes

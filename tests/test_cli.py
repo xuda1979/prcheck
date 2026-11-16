@@ -186,3 +186,27 @@ def test_cli_repo_requires_pr():
     r = _run(["--repo", "owner/repo"])
     assert r.returncode == 1
     assert "--repo requires --pr" in r.stderr
+
+
+def test_cli_invalid_openapi_spec_clean_error(tmp_path):
+    """A structurally invalid spec is a clean error, not a traceback."""
+    bad = tmp_path / "bad.yaml"
+    bad.write_text('openapi: 3.0.0\ninfo:\n  title: t\n  version: "1"\npaths: [oops]\n')
+    r = _run(
+        ["-d", str(DIFF), "--openapi-old", str(bad), "--openapi-new", str(V2), "--no-cache"]
+    )
+    assert r.returncode == 1
+    assert "'paths' must be a mapping" in r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_cli_invalid_openapi_yaml_clean_error(tmp_path):
+    """Unparseable YAML in a spec is also a clean error, not a traceback."""
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("openapi: 3.0.0\ninfo: [unclosed\n")
+    r = _run(
+        ["-d", str(DIFF), "--openapi-old", str(bad), "--openapi-new", str(V2), "--no-cache"]
+    )
+    assert r.returncode == 1
+    assert "invalid YAML" in r.stderr
+    assert "Traceback" not in r.stderr

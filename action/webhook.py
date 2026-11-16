@@ -111,5 +111,12 @@ if __name__ == "__main__":
     # Convenience: `python -m action.webhook payload.json` (no server needed)
     import sys
 
-    with open(sys.argv[1], encoding="utf-8") as f:
-        print(json.dumps(handle_event(json.load(f)), ensure_ascii=False, indent=2))
+    if len(sys.argv) < 2:
+        sys.exit("usage: python -m action.webhook <payload.json>")
+    try:
+        with open(sys.argv[1], encoding="utf-8") as f:
+            out = handle_event(json.load(f))
+    except (OSError, ValueError) as e:
+        # mirror the WSGI path: report bad input cleanly, never a traceback
+        sys.exit(f"error: {e}")
+    print(json.dumps(out, ensure_ascii=False, indent=2))

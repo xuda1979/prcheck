@@ -52,3 +52,40 @@ def test_wsgi_app_endpoint(monkeypatch):
     data = json.loads(b"".join(body_iter).decode())
     assert captured["status"].startswith("200")
     assert "result" in data and "gate" in data
+
+
+def test_webhook_cli_bad_spec_clean_error(tmp_path, monkeypatch):
+    """`python -m action.webhook` with a bad spec is a clean error, not a traceback."""
+    import subprocess
+    import sys
+
+    bad = tmp_path / "bad.yaml"
+    bad.write_text('openapi: 3.0.0\ninfo:\n  title: t\n  version: "1"\npaths: [oops]\n')
+    payload = tmp_path / "payload.json"
+    payload.write_text(json.dumps({"diff": "", "base_spec": str(bad),
+                                   "head_spec": str(FIXTURES / "openapi_v2.yaml")}))
+    res = subprocess.run(
+        [sys.executable, "-m", "action.webhook", str(payload)],
+        env={"PYTHONPATH": str(Path(__file__).parent.parent), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 1
+    assert "'paths' must be a mapping" in res.stderr
+    assert "Traceback" not in res.stderr
+
+
+def test_webhook_cli_missing_payload_usage(tmp_path):
+    """No payload arg is a usage error, not an IndexError traceback."""
+    import subprocess
+    import sys
+
+    res = subprocess.run(
+        [sys.executable, "-m", "action.webhook"],
+        env={"PYTHONPATH": str(Path(__file__).parent.parent), "PATH": "/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 1
+    assert "usage:" in res.stderr
+    assert "Traceback" not in res.stderr

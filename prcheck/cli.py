@@ -212,17 +212,22 @@ def main(argv: Optional[list[str]] = None) -> int:
         else:
             print(f"[cache] hit {key}", file=sys.stderr)
     if cached is None:
-        result = run_analysis(
-            diff_text,
-            base_spec_text=spec_texts[0] if spec_texts else None,
-            new_spec_text=spec_texts[1] if spec_texts else None,
-            base_spec_name=args.openapi_old or "",
-            new_spec_name=args.openapi_new or "",
-            security_only=args.security_only,
-            data_only=args.data_only,
-            behavior_only=args.behavior_only,
-            min_severity=args.min_severity,
-        )
+        try:
+            result = run_analysis(
+                diff_text,
+                base_spec_text=spec_texts[0] if spec_texts else None,
+                new_spec_text=spec_texts[1] if spec_texts else None,
+                base_spec_name=args.openapi_old or "",
+                new_spec_name=args.openapi_new or "",
+                security_only=args.security_only,
+                data_only=args.data_only,
+                behavior_only=args.behavior_only,
+                min_severity=args.min_severity,
+            )
+        except ValueError as e:
+            # malformed/invalid OpenAPI spec (e.g. bad YAML, missing version
+            # field, structurally invalid paths) — fail loudly but cleanly
+            sys.exit(f"error: {e}")
         issues = result.issues
         stat = result.stat
         openapi_changes = result.openapi_changes
