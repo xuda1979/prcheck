@@ -201,12 +201,17 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     cached = cache.get(key)
     if cached is not None:
-        issues = [Issue(**f) for f in cached["issues"]]
-        stat = cached["stat"]
-        openapi_changes = cached["openapi"]
-        semver: Optional[dict] = cached.get("semver")
-        print(f"[cache] hit {key}", file=sys.stderr)
-    else:
+        try:
+            issues = [Issue(**f) for f in cached["issues"]]
+            stat = cached["stat"]
+            openapi_changes = cached["openapi"]
+            semver: Optional[dict] = cached.get("semver")
+        except (KeyError, TypeError, ValueError):
+            # corrupt / wrong-schema entry: degrade to a recompute
+            cached = None
+        else:
+            print(f"[cache] hit {key}", file=sys.stderr)
+    if cached is None:
         result = run_analysis(
             diff_text,
             base_spec_text=spec_texts[0] if spec_texts else None,

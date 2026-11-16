@@ -1,5 +1,6 @@
 """Unit tests for the content-addressed analysis cache (FR #6)."""
 
+import json
 import os
 import subprocess
 import sys
@@ -69,3 +70,30 @@ def test_cli_uses_cache_and_reports_hit(tmp_path):
     assert "[cache] hit" in second.stderr
     # same report content on cache hit
     assert first.stdout == second.stdout
+
+
+def test_cli_survives_wrong_schema_cache_entry(tmp_path):
+    """A cache entry with a stale/corrupt payload schema is a clean missed,
+    not a traceback (regression: KeyError on old findings/stats keys)."""
+    fixtures = Path(__file__).parent / "fixtures"
+    cache_dir = tmp_path / "cache"
+    run = lambda *a: subprocess.run(  # noqa: E731
+        [sys.executable, "-m", "prcheck", *a],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).parent.parent)},
+    )
+    # write an entry under the CLI's own key using the old payload schema
+    stale_key = payload_key(
+        (fixtures / "example_pr.diff").read_text(), [], "|".join(["False", "False", "False", "info"])
+    )
+    stale_dir = Path(cache_dir)
+    stale_dir.mkdir(exist_ok=True)
+    (stale_dir / f"{stale_key}.json").write_text(
+        json.dumps({"findings": [], "stats": {"files_changed": 0}}), encoding="utf-8"
+    )
+    r = run("-d", str(fixtures / "example_pr.diff"), "--cache-dir", str(cache_dir))
+    assert r.returncode == 0, r.stderr
+    assert "[cache] hit" not in r.stderr
+    assert "Security checklist" in r.stdout
+    assert "Traceback" not in r.stderr
