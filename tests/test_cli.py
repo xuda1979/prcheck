@@ -185,6 +185,41 @@ def test_cli_fetch_pr_failure_propagates(tmp_path):
     assert "could not resolve to a Pull Request" in r.stderr
 
 
+def test_cli_mock_llm_alias():
+    """--mock-llm is an alias for --llm-summary (deterministic mock summary)."""
+    r = _run(["-d", str(DIFF), "--mock-llm", "--no-cache"])
+    assert r.returncode == 0, r.stderr
+    assert "Mock LLM summary" in r.stdout
+    assert "HIGH security" in r.stdout
+
+
+def test_cli_base_dir_resolves_relative_paths(tmp_path):
+    """--base-dir resolves relative diff/spec/output/cache refs against a root."""
+    import shutil
+
+    shutil.copy(DIFF, tmp_path / "pr.diff")  # base-dir-relative diff input
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    cache_dir = tmp_path / "cache"
+    r = _run(
+        [
+            "--base-dir",
+            str(tmp_path),
+            "pr.diff",  # bare positional relative to --base-dir
+            "--sarif",
+            "out.sarif",
+            "--cache-dir",
+            str(cache_dir),
+            "--no-cache",
+        ],
+        cwd=str(sub),  # cwd differs from the base dir to prove resolution
+    )
+    assert r.returncode == 0, r.stderr
+    assert "Security checklist" in r.stdout
+    assert (tmp_path / "out.sarif").exists(), "relative --sarif path should resolve under --base-dir"
+    assert json.loads((tmp_path / "out.sarif").read_text())["version"] == "2.1.0"
+
+
 def test_cli_repo_pr_conflicts_with_diff_file():
     """--repo/--pr and a diff file are mutually exclusive sources."""
     r = _run(["--repo", "owner/repo", "--pr", "42", "-d", str(DIFF)])

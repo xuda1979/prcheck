@@ -24,6 +24,21 @@ def _read(path: str | Path) -> str:
     return p.read_text(encoding="utf-8", errors="replace")
 
 
+def _resolve(path: str | Path, base: Path) -> Path:
+    """Resolve a possibly-relative path against ``base`` (--base-dir)."""
+    p = Path(path)
+    if not p.is_absolute():
+        p = base / p
+    return p
+
+
+def _base_dir(args) -> Path:
+    """Base directory for resolving relative paths (--base-dir; default cwd)."""
+    if args.base_dir:
+        return Path(args.base_dir).expanduser().resolve()
+    return Path.cwd()
+
+
 def fetch_pr_diff(repo: str, pr: str, gh: str = "gh") -> str:
     """Fetch a PR's diff via the ``gh`` CLI (SPEC FR1: local/Action modes).
 
@@ -135,7 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--mock-llm",
         action="store_true",
         dest="mock_llm_flag",
-        help="explicitly use the deterministic mock summarizer",
+        help="alias for --llm-summary: use the deterministic mock summarizer",
     )
     p.add_argument(
         "--base-dir",
@@ -156,6 +171,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    base = _base_dir(args)
     diff_text = ""
     if args.repo or args.pr:
         if args.diff or args.diff_file:
@@ -163,7 +179,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         diff_text = fetch_pr_diff(args.repo or "", args.pr or "")
     elif args.diff or args.diff_file:
         src = args.diff_file or (args.diff if args.diff else "")
-        # if the bare `diff` arg points to a file, read it
+        # resolve relative refs against --base-dir (default: cwd); "-" = stdin
+        if src != "-":
+            src = str(_resolve(src, base))
         if os.path.exists(src):
             diff_text = _read(src)
         elif src == "-":
@@ -179,7 +197,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     from .cache import AnalysisCache, payload_key
 
     # NB: optional LLM summary is NOT part of the cache key (mock, costless)
-    spec_texts = []
+    spec_srcs = []
     if (args.openapi_old is None) != (args.openapi_new is None):
         # an OpenAPI diff needs both sides; silently emitting a diff-less
         # report in CI hides a broken configuration
@@ -187,7 +205,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.openapi_old and args.openapi_new:
         # a requested spec that cannot be read is a hard error — silently
         # emitting a partial report in CI hides a broken configuration
-        spec_texts = [_read(args.openapi_old), _read(args.openapi_new)]
+        spec_srcs = [_resolve(args.openapi_old, base), _resolve(args.openapi_new, base)]
+    spec_texts = [_read(p) for p in spec_srcs]
     option_tag = "|".join(
         [
             str(args.security_only),
@@ -197,7 +216,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         ]
     )
     key = payload_key(diff_text, spec_texts, option_tag)
-    cache = AnalysisCache(args.cache_dir, enabled=not args.no_cache)
+    cache_dir = str(_resolve(args.cache_dir, base))
+    cache = AnalysisCache(cache_dir, enabled=not args.no_cache)
 
     cached = cache.get(key)
     if cached is not None:
@@ -255,17 +275,17 @@ def main(argv: Optional[list[str]] = None) -> int:
             openapi_changes=openapi_changes,
             high_blocked=gate_failed,
         )
-        if args.llm_summary:
+        if args.llm_summary or args.mock_llm_flag:
             md += "\n---\n" + Summarizer(enabled=True).summarize(issues, stat) + "\n"
         if args.output:
-            Path(args.output).write_text(md, encoding="utf-8")
+            _resolve(args.output, base).write_text(md, encoding="utf-8")
             print(f"wrote markdown report -> {args.output}")
         else:
             print(md, end="")
 
     if args.sarif:
         log = render_sarif(issues)
-        Path(args.sarif).write_text(log, encoding="utf-8")
+        _resolve(args.sarif, base).write_text(log, encoding="utf-8")
         print(f"wrote sarif log -> {args.sarif}")
 
     # exit policy
