@@ -97,6 +97,11 @@ python action/gh_comment.py --repo owner/repo --pr 12 --body-file report.md \
     --gh-cli            # via the `gh` CLI, or without --gh-cli via REST API(needs GH_TOKEN)
 ```
 
+The full report is **updated in place, not stacked**: on a re-run the Action
+looks for the previous report comment (tagged with a `<!-- prcheck-report -->`
+marker) and PATCHes it with the fresh body, so every push refreshes a single
+comment instead of accumulating duplicates.
+
 Offline simulation (no network, no token) — writes the would-be comment body
 into `tests/ghmock/posted_comment.md`:
 

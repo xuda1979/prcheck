@@ -275,3 +275,86 @@ class FakeResp:
 
 
 _EXISTING_COMMENTS: list = []
+
+
+# --- report comment upsert (task #14) -----------------------------------
+
+def test_with_report_marker_idempotent():
+    """The report marker is appended once, never doubled."""
+    from action.gh_comment import _REPORT_MARKER, _with_report_marker
+
+    once = _with_report_marker("# report")
+    assert once.endswith(_REPORT_MARKER)
+    assert once.count(_REPORT_MARKER) == 1
+    again = _with_report_marker(once)
+    assert again == once
+
+
+def test_update_or_post_comment_patches_existing(monkeypatch):
+    """A prior report marker comment is PATCHed in place, not re-POSTed."""
+    import urllib.request
+
+    from action import gh_comment
+
+    calls = []
+
+    def fake_urlopen(req, timeout=None):
+        if req.method == "GET":
+            marker = gh_comment._REPORT_MARKER
+            comments = [{"id": 91, "body": "old report" + marker}]
+            return FakeResp(json.dumps(comments).encode())
+        # PATCH — payload body must carry the marker exactly once
+        payload = json.loads(req.data.decode())
+        calls.append((req.method, req.full_url, payload["body"]))
+        assert "/repos/owner/repo/issues/comments/91" in req.full_url
+        assert payload["body"].count(gh_comment._REPORT_MARKER) == 1
+        return FakeResp(json.dumps({"html_url": "https://x/patched"}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    url = gh_comment.update_or_post_comment("owner/repo", "7", "# fresh")
+    assert url == "https://x/patched"
+    assert len(calls) == 1
+    assert calls[0][0] == "PATCH"
+
+
+def test_update_or_post_comment_posts_fresh_when_none(monkeypatch):
+    """No marker comment yet -> POST a brand-new report comment."""
+    import urllib.request
+
+    from action import gh_comment
+
+    posts = []
+
+    def fake_urlopen(req, timeout=None):
+        if req.method == "GET":
+            return FakeResp(b"[]")
+        payload = json.loads(req.data.decode())
+        posts.append((req.method, req.full_url, payload["body"]))
+        assert req.full_url.endswith("/issues/7/comments")
+        return FakeResp(json.dumps({"html_url": "https://x/new"}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    url = gh_comment.update_or_post_comment("owner/repo", "7", "# fresh")
+    assert url == "https://x/new"
+    assert posts[0][0] == "POST"
+    assert gh_comment._REPORT_MARKER in posts[0][2]
+
+
+def test_update_or_post_comment_falls_back_when_list_fails(monkeypatch):
+    """A failed comment-list GET degrades to posting a fresh comment."""
+    import urllib.error
+    import urllib.request
+
+    from action import gh_comment
+
+    def fake_urlopen(req, timeout=None):
+        if req.method == "GET":
+            raise urllib.error.HTTPError("http://x", 403, "Forbidden", None, None)
+        return FakeResp(json.dumps({"html_url": "https://x/new"}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    url = gh_comment.update_or_post_comment("owner/repo", "7", "# fresh")
+    assert url == "https://x/new"

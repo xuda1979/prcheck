@@ -72,6 +72,52 @@ def post_via_http(repo: str, pr_number: str, body: str) -> str:
 # on re-runs (idempotency), instead of piling duplicate comments onto a line.
 _INLINE_MARKER = "<!-- prcheck-inline -->"
 
+# Marker appended to the full-report PR comment. Re-runs (a `pull_request`
+# synchronize event after a new push) find the marker in the existing issue
+# comments and PATCH that comment in place instead of stacking a duplicate.
+_REPORT_MARKER = "\n\n<!-- prcheck-report -->"
+
+
+def _with_report_marker(body: str) -> str:
+    """Guarantee the report marker is present exactly once."""
+    if _REPORT_MARKER in body:
+        return body
+    return body + _REPORT_MARKER
+
+
+def update_or_post_comment(repo: str, pr_number: str, body: str) -> str:
+    """Post the full-report comment, updating a previous report in place.
+
+    Lists the PR's issue comments; if one carries the report marker, PATCH it
+    to the new body (so every push refreshes a single comment). Otherwise POST
+    a fresh comment. Returns the comment's HTML URL.
+    """
+    body = _with_report_marker(body)
+    list_url = f"{_api_base()}/repos/{repo}/issues/{pr_number}/comments"
+    try:
+        req = urllib.request.Request(
+            list_url,
+            headers={
+                "Authorization": f"token {_token()}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "prcheck-action",
+            },
+            method="GET",
+        )
+        with urllib.request.urlopen(req) as resp:  # noqa: S310
+            comments = json.loads(resp.read().decode("utf-8") or "[]")
+    except urllib.error.HTTPError:
+        # Listing failure is best-effort: fall back to posting a new comment.
+        comments = []
+    existing = next(
+        (c for c in comments if _REPORT_MARKER in c.get("body", "")), None
+    )
+    if existing:
+        url = f"{_api_base()}/repos/{repo}/issues/comments/{existing['id']}"
+        payload = _default_api_call("PATCH", url, {"body": body})
+        return payload.get("html_url", url)
+    return post_via_http(repo, pr_number, body)
+
 
 def _default_api_call(
     method: str, url: str, data: dict | None = None

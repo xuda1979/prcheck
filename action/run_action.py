@@ -183,10 +183,10 @@ def main() -> int:
         pr = _discover_pr_number()
         repo = os.environ.get("GITHUB_REPOSITORY", "")
         if pr and repo:
-            from action.gh_comment import post_via_http
+            from action.gh_comment import update_or_post_comment
 
             try:
-                url = post_via_http(repo, pr, md)
+                url = update_or_post_comment(repo, pr, md)
                 print(f"prcheck-action: comment posted -> {url}")
             except Exception as e:  # pragma: no cover
                 sys.stderr.write(f"prcheck-action: comment failed: {e}\n")
