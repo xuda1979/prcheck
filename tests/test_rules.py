@@ -44,6 +44,27 @@ def test_dependency_rule_fires_on_manifest():
     assert any("pyproject.toml" == i.path for i in deps)
 
 
+def test_dependency_rule_fires_on_unquoted_requirements_pins():
+    """requirements.txt pins written without quotes still produce findings.
+
+    Regression: the pyproject-style pattern required an opening quote, so a
+    bare `cryptography>=41.0.0` line slipped through silently.
+    """
+    src = (
+        "cryptography>=41.0.0\n"
+        "requests~=2.31\n"
+        "boto3==1.28.0\n"
+        "# comment-only line\n"
+        "flask\n"  # unpinned: must NOT fire
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="requirements.txt"))
+    deps = [i for i in issues if i.rule_id == "R006-deps"]
+    assert [i.line for i in deps] == [1, 2, 3], deps
+    assert all("requirements.txt" == i.path for i in deps)
+    lines = {i.snippet for i in deps}
+    assert "flask" not in lines, "an unpinned dependency must not match"
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})

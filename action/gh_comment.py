@@ -138,6 +138,50 @@ def _default_api_call(
         return json.loads(raw) if raw else {}
 
 
+def fetch_pr_state(repo: str, pr_number: str) -> dict:
+    """Read the PR's live mergeability / review / draft state.
+
+    Returns a dict with at least ``mergeable``, ``mergeable_state``,
+    ``draft``, ``merged`` and ``state`` (the raw API fields snake_cased by
+    GitHub). Callers use it to surface a concrete ``NOT_MERGEABLE`` / blocked
+    reason in the report instead of guessing from the diff alone.
+    """
+    url = f"{_api_base()}/repos/{repo}/pulls/{pr_number}"
+    payload = _default_api_call("GET", url)
+    return {
+        "mergeable": payload.get("mergeable"),
+        "mergeable_state": payload.get("mergeable_state"),
+        "draft": bool(payload.get("draft")),
+        "merged": bool(payload.get("merged")),
+        "state": payload.get("state"),
+    }
+
+
+# Label applied to a PR whose prcheck gate is failing. The label is prefixed so
+# operators can distinguish tool-managed labels from hand-curated ones.
+BLOCKER_LABEL = "prcheck:blocked"
+
+
+def sync_blocker_label(repo: str, pr_number: str, blocked: bool) -> str | None:
+    """Add/remove the blocker label so the PR list shows a failing gate.
+
+    Returns the label name when the label is now present, ``None`` when it was
+    removed. The GitHub issue-label API is idempotent: adding an existing label
+    returns 200 (not a duplicate); removing a missing label is a 200 no-op.
+    """
+    url = f"{_api_base()}/repos/{repo}/issues/{pr_number}/labels"
+    if blocked:
+        _default_api_call("POST", url, {"labels": [BLOCKER_LABEL]})
+        return BLOCKER_LABEL
+    try:
+        _default_api_call("DELETE", f"{url}/{BLOCKER_LABEL}")
+    except urllib.error.HTTPError as e:
+        # 404 means the label wasn't there — already in the desired state.
+        if e.code != 404:
+            raise
+    return None
+
+
 def review_comments_for_issues(issues: list) -> list[dict]:
     """Turn engine issues into inline comment payloads.
 

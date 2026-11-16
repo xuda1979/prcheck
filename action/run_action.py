@@ -219,6 +219,41 @@ def main() -> int:
                              "PR/commit not detected (GITHUB_EVENT_PATH, "
                              "GITHUB_SHA or PR_NUMBER)\n")
 
+    # optional PR mergeability readback (surface GitHub's live gate picture)
+    pr_state: dict | None = None
+    if _env_flag("INPUT_CHECK_MERGEABLE"):
+        pr = _discover_pr_number()
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        if pr and repo:
+            from action.gh_comment import fetch_pr_state
+
+            try:
+                pr_state = fetch_pr_state(repo, pr)
+                print(f"prcheck-action: PR {pr} mergeable={pr_state['mergeable']} "
+                      f"state={pr_state['mergeable_state']}")
+            except Exception as e:  # pragma: no cover
+                sys.stderr.write(f"prcheck-action: mergeable check failed: {e}\n")
+        else:
+            sys.stderr.write("prcheck-action: CHECK_MERGEABLE=true but no PR "
+                             "detected (GITHUB_EVENT_PATH / PR_NUMBER)\n")
+
+    # optional blocker-label sync (add when the gate fails, remove when it passes)
+    if _env_flag("INPUT_SYNC_LABELS"):
+        pr = _discover_pr_number()
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        if pr and repo:
+            from action.gh_comment import sync_blocker_label
+
+            try:
+                label = sync_blocker_label(repo, pr, blocked)
+                verb = "added" if label else "removed (no blocker)"
+                print(f"prcheck-action: {verb} {label or 'prcheck:blocked'}")
+            except Exception as e:  # pragma: no cover
+                sys.stderr.write(f"prcheck-action: label sync failed: {e}\n")
+        else:
+            sys.stderr.write("prcheck-action: SYNC_LABELS=true but no PR "
+                             "detected (GITHUB_EVENT_PATH / PR_NUMBER)\n")
+
     return 1 if blocked else 0
 
 

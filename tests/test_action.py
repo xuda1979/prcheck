@@ -427,8 +427,9 @@ def test_update_or_post_comment_falls_back_when_list_fails(monkeypatch):
 class _FakeGH:
     """Records API calls; serves canned responses for action main() tests."""
 
-    def __init__(self, issue_comments=None):
+    def __init__(self, issue_comments=None, pr_state=None):
         self.issue_comments = issue_comments if issue_comments is not None else []
+        self.pr_state = pr_state
         self.calls = []  # (method, full_url, json_payload or None)
         self._n = 0
 
@@ -439,6 +440,10 @@ class _FakeGH:
             return FakeResp(json.dumps(self.issue_comments).encode())
         if req.method == "GET" and req.full_url.endswith("/pulls/9/comments"):
             return FakeResp(b"[]")
+        segs = req.full_url.split("/")
+        if req.method == "GET" and len(segs) >= 6 and segs[-2] == "pulls" \
+                and segs[-1].isdigit():
+            return FakeResp(json.dumps(self.pr_state or {}).encode())
         self._n += 1
         return FakeResp(
             json.dumps({"html_url": f"https://example.com/ok#{self._n}"}).encode()
@@ -629,4 +634,198 @@ def test_main_inline_comment_failure_degrades_cleanly(monkeypatch, capsys, tmp_p
     err = capsys.readouterr().err
     assert rc == 0, err
     assert "inline comments failed: review API down" in err
+    assert "Traceback" not in err
+
+
+# --- mergeable-state readback + blocker-label sync -----------------------
+
+def test_fetch_pr_state_returns_github_fields(monkeypatch):
+    """GET /pulls/N maps GitHub's mergeability fields for the report."""
+    import urllib.request
+
+    from action import gh_comment
+
+    def fake_urlopen(req, timeout=None):
+        assert req.method == "GET"
+        assert req.full_url.endswith("/repos/owner/repo/pulls/7")
+        return FakeResp(json.dumps({
+            "mergeable": True,
+            "mergeable_state": "clean",
+            "draft": False,
+            "merged": False,
+            "state": "open",
+        }).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    assert gh_comment.fetch_pr_state("owner/repo", "7") == {
+        "mergeable": True,
+        "mergeable_state": "clean",
+        "draft": False,
+        "merged": False,
+        "state": "open",
+    }
+
+
+def test_sync_blocker_label_adds_when_blocked(monkeypatch):
+    """blocked=True POSTs the prcheck:blocked label (issues/PRs/N/labels)."""
+    import urllib.request
+
+    from action import gh_comment
+
+    calls = []
+
+    def fake_urlopen(req, timeout=None):
+        payload = json.loads(req.data.decode()) if req.data else None
+        calls.append((req.method, req.full_url, payload))
+        return FakeResp(json.dumps({"labels": [{"name": "prcheck:blocked"}]}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    assert gh_comment.sync_blocker_label("owner/repo", "7", True) == "prcheck:blocked"
+    method, url, payload = calls[0]
+    assert method == "POST"
+    assert url.endswith("/repos/owner/repo/issues/7/labels")
+    assert payload == {"labels": ["prcheck:blocked"]}
+
+
+def test_sync_blocker_label_removes_when_unblocked(monkeypatch):
+    """blocked=False DELETEs the prcheck:blocked label (no-op when absent)."""
+    import urllib.request
+
+    from action import gh_comment
+
+    calls = []
+
+    def fake_urlopen(req, timeout=None):
+        calls.append((req.method, req.full_url))
+        return FakeResp(b"{}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    assert gh_comment.sync_blocker_label("owner/repo", "7", False) is None
+    assert calls[0][0] == "DELETE"
+    assert calls[0][1].endswith(
+        "/repos/owner/repo/issues/7/labels/prcheck:blocked"
+    )
+
+
+def test_sync_blocker_label_removal_tolerates_404(monkeypatch):
+    """A 404 on label removal (already absent) is a successful no-op."""
+    import urllib.error
+    import urllib.request
+
+    from action import gh_comment
+
+    def fake_urlopen(req, timeout=None):
+        raise urllib.error.HTTPError("http://x", 404, "Not Found", None, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    assert gh_comment.sync_blocker_label("owner/repo", "7", False) is None
+
+
+def test_main_reads_mergeable_state(tmp_path, monkeypatch, capsys):
+    """CHECK_MERGEABLE=true logs the PR's live mergeability picture."""
+    import urllib.request
+
+    from action import run_action
+
+    fake = _FakeGH(pr_state={
+        "mergeable": False,
+        "mergeable_state": "blocked",
+        "draft": False,
+        "merged": False,
+        "state": "open",
+    })
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    monkeypatch.setenv("INPUT_DIFF", DIFF.read_text())
+    monkeypatch.setenv("INPUT_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("INPUT_REQUIRE_HIGH_OK", "false")
+    monkeypatch.setenv("INPUT_CHECK_MERGEABLE", "true")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("PR_NUMBER", "7")
+
+    rc = run_action.main()
+    assert rc == 0, capsys.readouterr().err
+    out = capsys.readouterr().out
+    assert "mergeable=False" in out and "state=blocked" in out
+    pr_gets = [c for c in fake.calls
+               if c[0] == "GET" and c[1].endswith("/repos/owner/repo/pulls/7")]
+    assert pr_gets, fake.calls
+
+
+def test_main_syncs_blocker_label_when_blocked(tmp_path, monkeypatch, capsys):
+    """SYNC_LABELS=true POSTs the blocker label when the gate fails."""
+    import urllib.request
+
+    from action import run_action
+
+    fake = _FakeGH()
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    monkeypatch.setenv("INPUT_DIFF", DIFF.read_text())
+    monkeypatch.setenv("INPUT_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("INPUT_REQUIRE_HIGH_OK", "true")  # fixture highs -> blocked
+    monkeypatch.setenv("INPUT_SYNC_LABELS", "true")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("PR_NUMBER", "7")
+
+    rc = run_action.main()
+    assert rc == 1, capsys.readouterr().err  # gate still blocks
+    labels = [c for c in fake.calls if c[1].endswith("/issues/7/labels")]
+    assert labels and labels[0][0] == "POST"
+    assert labels[0][2] == {"labels": ["prcheck:blocked"]}
+    assert "added" in capsys.readouterr().out
+
+
+def test_main_removes_blocker_label_when_passing(tmp_path, monkeypatch, capsys):
+    """SYNC_LABELS=true DELETEs the blocker label when the gate passes."""
+    import urllib.request
+
+    from action import run_action
+
+    fake = _FakeGH()
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    monkeypatch.setenv("INPUT_DIFF", DIFF.read_text())
+    monkeypatch.setenv("INPUT_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("INPUT_REQUIRE_HIGH_OK", "false")  # gate passes
+    monkeypatch.setenv("INPUT_SYNC_LABELS", "true")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("PR_NUMBER", "7")
+
+    rc = run_action.main()
+    assert rc == 0, capsys.readouterr().err
+    deletes = [c for c in fake.calls if c[0] == "DELETE"]
+    assert deletes
+    assert deletes[0][1].endswith("/labels/prcheck:blocked")
+
+
+def test_main_mergeable_and_label_failures_degrade_cleanly(
+    tmp_path, monkeypatch, capsys
+):
+    """API failures in the mergeable/label blocks are clean warnings only."""
+    from action import gh_comment, run_action
+
+    def raise_api_down(*a, **k):
+        raise RuntimeError("api down")
+
+    monkeypatch.setattr(gh_comment, "fetch_pr_state", raise_api_down)
+    monkeypatch.setattr(gh_comment, "sync_blocker_label", raise_api_down)
+    monkeypatch.setenv("INPUT_DIFF", DIFF.read_text())
+    monkeypatch.setenv("INPUT_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("INPUT_REQUIRE_HIGH_OK", "false")
+    monkeypatch.setenv("INPUT_CHECK_MERGEABLE", "true")
+    monkeypatch.setenv("INPUT_SYNC_LABELS", "true")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("PR_NUMBER", "7")
+
+    rc = run_action.main()
+    err = capsys.readouterr().err
+    assert rc == 0, err
+    assert "mergeable check failed: api down" in err
+    assert "label sync failed: api down" in err
     assert "Traceback" not in err

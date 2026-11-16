@@ -8,3 +8,5 @@ dist/
 .reports/
 .prcheck-cache/
 .future-code/
+# stdlib trace --count coverage artifacts
+*.cover

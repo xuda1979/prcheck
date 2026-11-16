@@ -61,6 +61,20 @@ inputs:
       pull-requests: write and a detected PR + head commit.
     required: false
     default: "false"
+  check-mergeable:
+    description: >
+      Read the PR's live mergeable/mergeable_state from the GitHub API and
+      echo it into the action log. Requires a GITHUB_TOKEN with pull-requests:
+      read. Purely informational; never fails the run by itself.
+    required: false
+    default: "false"
+  sync-labels:
+    description: >
+      Add the 'prcheck:blocked' label when the gate fails and remove it when
+      it passes, so blocked PRs stand out in the list view. Requires a
+      GITHUB_TOKEN with issues: write.
+    required: false
+    default: "false"
 outputs:
   report-path:
     description: "Path to the generated Markdown report."
