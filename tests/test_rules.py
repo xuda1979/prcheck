@@ -126,6 +126,16 @@ _UNCOVERED_RULE_CASES = [
         "SESSION_COOKIE_SECURE = False\napp.config['SESSION_COOKIE_HTTPONLY'] = None\n"
         "SameSite=None\n",
     ),
+    (
+        "R012-cmd",
+        "security",
+        "high",
+        "os.system(\"restart.sh \" + cfg.url)\n"
+        "os.popen('ls -l ' + user_input)\n"
+        "subprocess.run('grep ' + term, shell=True)\n"
+        "subprocess.Popen(f'curl {url}', shell=True)\n"
+        "subprocess.check_call(cmd, shell=shell_enabled)\n",
+    ),
 ]
 
 
@@ -156,6 +166,7 @@ def test_every_rule_has_test_exposure():
         "D001", "D002-db", "D003", "D004",
         "R001-a", "R001-b", "R002", "R003", "R004", "R005",
         "R006-deps", "R007-cors", "R008", "R009", "R010", "R011-session",
+        "R012-cmd",
     }
     assert exposed <= rids
     uncovered = rids - exposed

@@ -123,6 +123,19 @@ _RULE_TUPLES = [
         "SESSION_COOKIE_SECURE / SameSite relaxed or removed",
         r"(?i)\bsession_cookie_(?:secure|httponly)\s*=\s*(?:False|None)\b|SameSite\s*=\s*None",
     ),
+    (
+        "R012-cmd",
+        "security",
+        "high",
+        "Command executed via shell (possible OS command injection)",
+        # Direct shell entry points; subprocess with shell=True; any shell or
+        # subprocess exec built by string concatenation / interpolation.
+        r"\b(?:os|commands)\.(?:system|popen)\s*\(|"
+        r"\bsubprocess\.(?:call|run|Popen|check_call|check_output)\s*\([^\n]*shell\s*=\s*(?:True|\w+)|"
+        r"\b(?:os\.system|os\.popen|subprocess\.(?:call|run|Popen|check_call|check_output))"
+        r"\s*\([^\n]*(?:\+|\s*%\s*[\'\"]|f[\'\"])",
+        "Prefer argument lists over shell strings; validate/quote any variable input",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
