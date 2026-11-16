@@ -395,6 +395,41 @@ def test_ssti_literals_and_string_template_quiet():
     assert not [i for i in issues if i.rule_id == "R022-ssti"], issues
 
 
+def test_xxe_xml_parsers_of_request_or_named_data_flagged():
+    """R023-xxe flags stdlib/lxml/xmltodict XML parsing of request input or
+    xml-named variables."""
+    src = (
+        "tree = xml.etree.ElementTree.fromstring(request.data)\n"
+        "root = xml.etree.ElementTree.fromstring(request.data)\n"
+        "parsed = xmltodict.parse(request.files['xml'])\n"
+        "root = etree.fromstring(xml_body)\n"
+        "events = sax.parseString(xml_payload)\n"
+        "t = pulldom.parseString(xml_content)\n"
+        "doc = lxml.etree.fromstring(user_xml)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R023-xxe"]
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6, 7], f"R023-xxe mismatch: {hits}"
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_xxe_static_and_defusedxml_quiet():
+    """R023-xxe must not fire on literals, defusedxml, non-XML docs or
+    SCREAMING_CASE constants."""
+    src = (
+        "tree = ET.fromstring('<root><a/></root>')\n"
+        "safe = defusedxml.etree.fromstring(xml_payload)\n"
+        "cfg = xml.etree.ElementTree.parse('config.xml')\n"
+        "data = xmltodict.parse(json_payload)\n"
+        "out = urlparse(request.args.get('u'))\n"
+        "root = etree.fromstring(STATIC_XML)\n"  # SCREAMING_CASE constant
+        "s = sax.parseString('<a/>')\n"
+        "h = hashlib.sha256(xml.encode()).hexdigest()\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R023-xxe"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -555,7 +590,7 @@ def test_every_rule_has_test_exposure():
         "R006-deps", "R007-cors", "R008", "R009", "R010", "R011-session",
         "R012-cmd", "R013-path", "R014-xss", "R015-crypto", "R016-random",
         "R017-redirect", "R018-debug", "R019-csrf", "R020-pem", "R021-ssrf",
-        "R022-ssti",
+        "R022-ssti", "R023-xxe",
     }
     assert exposed <= rids
     uncovered = rids - exposed

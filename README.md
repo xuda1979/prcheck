@@ -175,7 +175,8 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   cookie flags, weak/legacy crypto, insecure `random` for security values,
   open redirects, SSRF (outbound fetches of request-derived URLs), debug mode
   / DEBUG-level logging, CSRF protection disabled, committed private key
-  material (PEM key blocks), server-side template injection (SSTI).
+  material (PEM key blocks), server-side template injection (SSTI), XXE
+  (XML parsers fed request-derived data).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

@@ -333,6 +333,35 @@ _RULE_TUPLES = [
         r"(?-i:(?:tmpl|template|tpl|markup))[\w.\[\]]*(?:\s*,|\s*\))",
         "Never render a template obtained from request input; compile approved templates only",
     ),
+    (
+        "R023-xxe",
+        "security",
+        "medium",
+        "XML parser fed request-derived data (XXE / entity expansion risk)",
+        # (A) stdlib / lxml / xmltodict XML sink fed request input (raw-body
+        #     webhooks are the classic XXE path). A quoted literal fails the
+        #     (?!['\"]) guard, so static documents stay quiet.
+        r"(?i)\b(?:xml\.etree\.ElementTree\.(?:fromstring|parse|XML)|xml\.sax\.(?:parse|parseString)"
+        r"|xml\.dom\.(?:minidom|pulldom)\.(?:parse|parseString)|lxml\.(?:etree|objectify)\.(?:fromstring|parse|XML)"
+        r"|xmltodict\.parse)\s*\(\s*(?!['\"])([^\n)]*?request\.(?:args|values|form|headers|json|data|get_data\b|files))|"
+        # (B) same sinks with an xml-named variable (xml_body / user_xml /
+        #     xml_payload …). The word must be the terminal id component,
+        #     matched case-sensitively (scoped (?-i:xml)) so SCREAMING_CASE
+        #     constants (STATIC_XML) stay quiet; the lowercase lookahead rejects
+        #     all-caps ids outright.
+        r"\b(?:xml\.etree\.ElementTree\.(?:fromstring|parse|XML)|xml\.sax\.(?:parse|parseString)"
+        r"|xml\.dom\.(?:minidom|pulldom)\.(?:parse|parseString)|lxml\.(?:etree|objectify)\.(?:fromstring|parse|XML)"
+        r"|xmltodict\.parse)\s*\(\s*(?!['\"])(?=[\w.]*[a-z])(?:[\w.]*?)?"
+        r"(?-i:xml)[\w.\[\]]*(?:\s*,|\s*\))|"
+        # (C) aliased imports (ET / etree / ElementTree / sax / minidom /
+        #     pulldom / objectify / xmltodict) fed request input or an xml-named
+        #     variable. (?<!defusedxml\.) keeps the safe defusedxml parser quiet.
+        r"(?<!defusedxml\.)\b(?:etree|ElementTree|ET|objectify|sax|minidom|pulldom|xmltodict)"
+        r"\s*\.\s*(?:fromstring|parse|parseString|XML)\s*\(\s*(?!['\"])(?:"
+        r"([^\n)]*?request\.(?:args|values|form|headers|json|data|get_data\b|files))|"
+        r"(?=[\w.]*[a-z])(?:[\w.]*?)?(?-i:xml)[\w.\[\]]*(?:\s*,|\s*\)))",
+        "Parse untrusted XML with a hardened parser (defusedxml); disable external entity expansion",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
