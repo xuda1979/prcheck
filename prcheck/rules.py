@@ -72,9 +72,10 @@ _RULE_TUPLES = [
         "security",
         "medium",
         "TLS / certificate check disabled",
-        r"(?i)(?:verify\s*=\s*False|verify_mode\s*=\s*ssl\.CERT_NONE|check_hostname\s*=\s*False"
+        r"(?i)^(?:(?!\bjwt\.(?:decode|verify)\s*\().)*?\bverify\s*=\s*False|"
+        r"verify_mode\s*=\s*ssl\.CERT_NONE|check_hostname\s*=\s*False"
         r"|ssl_verify_disabled|CURLOPT_SSL_VERIFYPEER\s*,\s*0"
-        r"|SSL_CERT_REQUIRED\s*=\s*CERT_NONE|ssl\._create_unverified_context)",
+        r"|SSL_CERT_REQUIRED\s*=\s*CERT_NONE|ssl\._create_unverified_context",
     ),
     (
         "R004",

@@ -119,12 +119,14 @@ def test_tls_verify_cert_none_and_check_hostname_flagged():
     src = (
         "ctx.verify_mode = ssl.CERT_NONE\n"
         "ctx.check_hostname = False\n"
+        "res = requests.get(url, verify=False)\n"  # fetch TLS disable: fires
         "ctx.verify_mode = ssl.CERT_REQUIRED\n"  # safe: must NOT fire
         "res = requests.get(url, verify=True)\n"  # safe
+        "claims = jwt.decode(token, SECRET, verify=False)\n"  # JWT sig: R024, NOT R003
     )
     issues, _ = analyze_to_issues(_inline_diff(src))
     hits = [i.line for i in issues if i.rule_id == "R003"]
-    assert hits == [1, 2], f"R003 fired on safe TLS lines: {hits}"
+    assert hits == [1, 2, 3], f"R003 fired on safe TLS lines: {hits}"
 
 
 def test_sensitive_logging_flags_keyword_in_arguments():
