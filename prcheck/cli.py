@@ -77,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
                "plus an OpenAPI breaking-change report.",
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    p.add_argument("diff", nargs="?", help="path to PR diff file (or use -D/-d)")
+    p.add_argument("diff", nargs="?", help="path to PR diff file (or use -d/--diff-file)")
     p.add_argument("-d", "--diff-file", dest="diff_file", help="path to PR diff")
     p.add_argument(
         "--repo",
