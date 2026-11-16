@@ -284,7 +284,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(md, end="")
 
     if args.sarif:
-        log = render_sarif(issues)
+        log = render_sarif(
+            issues,
+            openapi_changes=openapi_changes,
+            spec_name=args.openapi_new or "openapi.yaml",
+        )
         _resolve(args.sarif, base).write_text(log, encoding="utf-8")
         print(f"wrote sarif log -> {args.sarif}")
 

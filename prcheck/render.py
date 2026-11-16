@@ -112,8 +112,16 @@ def render_sarif(
     *,
     tool_name: str = "prcheck",
     sarif_version: str = "2.1.0",
+    openapi_changes: list | None = None,
+    spec_name: str = "openapi.yaml",
 ) -> str:
-    """Produce a SARIF log for CI emitters (GitHub code scanning compatible)."""
+    """Produce a SARIF log for CI emitters (GitHub code scanning compatible).
+
+    Checklist findings carry ``path:line`` locations. OpenAPI changelog
+    records are folded in too: a breaking change maps to SARIF ``error`` so
+    it surfaces as a code-scanning alert (annotated on the spec file),
+    instead of only living in the PR comment.
+    """
     issues = list(issues)
     results = []
     for i in issues:
@@ -136,6 +144,42 @@ def render_sarif(
                 "properties": {"category": i.category, "severity": i.severity},
             }
         )
+    openapi_rules: dict[str, dict] = {}
+    for c in openapi_changes or []:
+        kind = c.get("type", "change")
+        breaking = bool(c.get("breaking"))
+        ref = c.get("path") or c.get("schema") or c.get("method") or "spec"
+        summary = (c.get("summary") or "").strip()
+        detail = (c.get("detail") or "").strip()
+        rule_id = f"openapi-{kind}" + ("-breaking" if breaking else "")
+        text = f"OpenAPI {kind} `{ref}`: {summary}"
+        if detail:
+            text += f" — {detail}"
+        results.append(
+            {
+                "ruleId": rule_id,
+                "level": "error" if breaking else _sarif_level(c.get("severity", "medium")),
+                "message": {"text": text},
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": spec_name},
+                        }
+                    }
+                ],
+                "properties": {"category": "openapi", "breaking": breaking},
+            }
+        )
+        desc = f"OpenAPI changelog: {kind} changed ({'breaking' if breaking else 'non-breaking'})"
+        openapi_rules.setdefault(
+            rule_id,
+            {
+                "id": rule_id,
+                "shortDescription": {"text": desc},
+                "fullDescription": {"text": desc},
+                "properties": {"category": "openapi", "tags": ["openapi"]},
+            },
+        )
     rules = [
         {
             "id": rid,
@@ -144,7 +188,7 @@ def render_sarif(
             "properties": {"category": r.category, "severity": r.severity, "tags": [r.category]},
         }
         for rid, r in sorted(_import_rules().items())
-    ]
+    ] + sorted(openapi_rules.values(), key=lambda r: r["id"])
     log = {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": sarif_version,

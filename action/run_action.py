@@ -160,7 +160,13 @@ def main() -> int:
         high_blocked=blocked,
     )
     (out_dir / "report.md").write_text(md, encoding="utf-8")
-    (out_dir / "report.sarif").write_text(render_sarif(issues), encoding="utf-8")
+    (out_dir / "report.sarif").write_text(
+        render_sarif(
+            issues,
+            openapi_changes=openapi_changes,
+            spec_name=head_spec or "openapi.yaml",
+        )
+    )
 
     semver_path = out_dir / "semver.json"
     semver_path.write_text(
