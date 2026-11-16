@@ -54,19 +54,8 @@ def post_via_gh_cli(repo: str, pr_number: str, body: str, *, draft: bool = False
 def post_via_http(repo: str, pr_number: str, body: str) -> str:
     """Post a comment directly through https://api.github.com."""
     api = f"{_api_base()}/repos/{repo}/issues/{pr_number}/comments"
-    req = urllib.request.Request(
-        api,
-        data=json.dumps({"body": body}).encode("utf-8"),
-        headers={
-            "Authorization": f"token {_token()}",
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "prcheck-action",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req) as resp:  # noqa: S310 (explicit GitHub API)
-        payload = json.loads(resp.read().decode("utf-8"))
-        return payload.get("html_url", api)
+    payload = _default_api_call("POST", api, {"body": body})
+    return payload.get("html_url", api)
 
 
 # Marker so inline comments posted by this tool can be recognized and skipped
@@ -96,17 +85,7 @@ def update_or_post_comment(repo: str, pr_number: str, body: str) -> str:
     body = _with_report_marker(body)
     list_url = f"{_api_base()}/repos/{repo}/issues/{pr_number}/comments"
     try:
-        req = urllib.request.Request(
-            list_url,
-            headers={
-                "Authorization": f"token {_token()}",
-                "Accept": "application/vnd.github+json",
-                "User-Agent": "prcheck-action",
-            },
-            method="GET",
-        )
-        with urllib.request.urlopen(req) as resp:  # noqa: S310
-            comments = json.loads(resp.read().decode("utf-8") or "[]")
+        comments = _default_api_call("GET", list_url)
     except urllib.error.HTTPError:
         # Listing failure is best-effort: fall back to posting a new comment.
         comments = []
@@ -294,24 +273,14 @@ def list_review_comment_bodies(
     marker = _INLINE_MARKER + "\n\n"
     url = f"{_api_base()}/repos/{repo}/pulls/{pr_number}/comments"
     try:
-        req = urllib.request.Request(
-            url,
-            headers={
-                "Authorization": f"token {_token()}",
-                "Accept": "application/vnd.github+json",
-                "User-Agent": "prcheck-action",
-            },
-            method="GET",
-        )
-        with urllib.request.urlopen(req) as resp:  # noqa: S310
-            payload = json.loads(resp.read().decode("utf-8") or "[]")
-        return {
-            c["body"]
-            for c in payload
-            if c.get("body", "").startswith(marker)
-        }
+        payload = _default_api_call("GET", url)
     except urllib.error.HTTPError:
         return set()
+    return {
+        c["body"]
+        for c in payload
+        if c.get("body", "").startswith(marker)
+    }
 
 
 def post_review_comments(
