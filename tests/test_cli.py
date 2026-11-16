@@ -93,6 +93,17 @@ def test_cli_version():
     assert r.stdout.strip() == f"prcheck {__import__('prcheck').__version__}"
 
 
+def test_cli_llm_summary_section():
+    """--llm-summary appends the mock (offline) summary, listing high items."""
+    r = _run(["-d", str(DIFF), "--llm-summary", "--no-cache"])
+    assert r.returncode == 0, r.stderr
+    assert "Mock LLM summary" in r.stdout
+    assert "HIGH security" in r.stdout
+    # Off by default: no summary without the flag
+    r2 = _run(["-d", str(DIFF), "--no-cache"])
+    assert "Mock LLM summary" not in r2.stdout
+
+
 def test_cli_requires_both_openapi_flags():
     """Only one of --openapi-old/--openapi-new is a config error."""
     r = _run(["-d", str(DIFF), "--openapi-old", str(V1)])

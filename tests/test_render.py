@@ -49,3 +49,14 @@ def test_sarif_has_locations():
     loc = res["locations"][0]["physicalLocation"]
     assert "artifactLocation" in loc
     assert "region" in loc and loc["region"]["startLine"] >= 1
+
+
+def test_sarif_every_result_rule_is_defined():
+    """Every result ruleId must resolve to a driver rule (code-scanner compat)."""
+    issues, _ = analyze_to_issues(FIXTURE.read_text())
+    doc = json.loads(render_sarif(issues))
+    run = doc["runs"][0]
+    defined = {r["id"] for r in run["tool"]["driver"]["rules"]}
+    assert defined, "SARIF run must define at least one rule"
+    referenced = {r["ruleId"] for r in run["results"]}
+    assert referenced and referenced <= defined

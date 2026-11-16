@@ -7,6 +7,7 @@ on:
 permissions:
   contents: read
   pull-requests: write   # needed only for the comment step; set to read to disable
+  security-events: write # needed to upload SARIF results to code scanning
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -41,12 +42,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload SARIF (code scanning)
+      - name: Upload reports (Markdown + SARIF)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: prcheck-reports
-          path: ${{ steps.prcheck.outputs.report-path }}
+          path: |
+            ${{ steps.prcheck.outputs.report-path }}
+            ${{ steps.prcheck.outputs.sarif-path }}
+            ${{ steps.prcheck.outputs.semver-file }}
+
+      - name: Upload SARIF to code scanning
+        if: always() && steps.prcheck.outputs.sarif-path != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ steps.prcheck.outputs.sarif-path }}
 
       - name: Annotate findings placeholder
         if: failure()
