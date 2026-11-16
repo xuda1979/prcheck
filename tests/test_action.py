@@ -547,3 +547,86 @@ def test_main_posts_inline_comments_from_event_path(tmp_path, monkeypatch, capsy
     assert methods[0] == "GET", "existing review comments listed before POSTs"
     out = capsys.readouterr().out
     assert f"posted {len(posts)} inline comments" in out
+
+
+def test_main_comment_failure_degrades_cleanly(monkeypatch, capsys, tmp_path):
+    """A posting exception is a clean warning; the gate exit code still wins."""
+    import urllib.request
+
+    from action import gh_comment, run_action
+
+    def boom(repo, pr, body):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(gh_comment, "update_or_post_comment", boom)
+    monkeypatch.setattr(urllib.request, "urlopen", _FakeGH())  # not reached
+    monkeypatch.setenv("INPUT_DIFF", DIFF.read_text())
+    monkeypatch.setenv("INPUT_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("INPUT_REQUIRE_HIGH_OK", "false")
+    monkeypatch.setenv("INPUT_POST_COMMENT", "true")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("PR_NUMBER", "7")
+
+    rc = run_action.main()
+    err = capsys.readouterr().err
+    assert rc == 0, err  # gate not blocked -> pass, even though posting failed
+    assert "comment failed: network down" in err
+    assert "Traceback" not in err
+
+
+def test_main_comment_failure_keeps_gate_block(monkeypatch, capsys, tmp_path):
+    """A blocked gate stays blocked even when the comment post itself fails."""
+    from action import gh_comment, run_action
+
+    def boom(repo, pr, body):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(gh_comment, "update_or_post_comment", boom)
+    monkeypatch.setenv("INPUT_DIFF", DIFF.read_text())
+    monkeypatch.setenv("INPUT_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("INPUT_REQUIRE_HIGH_OK", "true")  # highs in fixture -> blocked
+    monkeypatch.setenv("INPUT_POST_COMMENT", "true")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("PR_NUMBER", "7")
+
+    rc = run_action.main()
+    assert rc == 1, capsys.readouterr().err  # comment failure must not unblock the gate
+
+
+def test_main_inline_comment_failure_degrades_cleanly(monkeypatch, capsys, tmp_path):
+    """POST_INLINE_COMMENT exception degrades to a clean stderr warning."""
+    import urllib.request
+
+    from action import gh_comment, run_action
+
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({
+        "action": "synchronize",
+        "number": 9,
+        "pull_request": {"number": 9, "head": {"sha": "abc123def"}},
+        "repository": {"full_name": "owner/repo"},
+    }))
+
+    def boom(repo, pr, commit_id, comments):
+        raise RuntimeError("review API down")
+
+    monkeypatch.setattr(gh_comment, "post_review_comments", boom)
+    monkeypatch.setattr(urllib.request, "urlopen", _FakeGH())
+    monkeypatch.setenv("INPUT_DIFF", DIFF.read_text())
+    monkeypatch.setenv("INPUT_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("INPUT_REQUIRE_HIGH_OK", "false")
+    monkeypatch.setenv("INPUT_POST_COMMENT", "false")
+    monkeypatch.setenv("INPUT_POST_INLINE_COMMENT", "true")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.delenv("PR_NUMBER", raising=False)
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+
+    rc = run_action.main()
+    err = capsys.readouterr().err
+    assert rc == 0, err
+    assert "inline comments failed: review API down" in err
+    assert "Traceback" not in err
