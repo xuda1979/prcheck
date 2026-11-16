@@ -55,7 +55,8 @@ _RULE_TUPLES = [
         "security",
         "medium",
         "TLS / certificate check disabled",
-        r"(?i)(?:verify\s*=\s*False|ssl_verify_disabled|CURLOPT_SSL_VERIFYPEER\s*,\s*0"
+        r"(?i)(?:verify\s*=\s*False|verify_mode\s*=\s*ssl\.CERT_NONE|check_hostname\s*=\s*False"
+        r"|ssl_verify_disabled|CURLOPT_SSL_VERIFYPEER\s*,\s*0"
         r"|SSL_CERT_REQUIRED\s*=\s*CERT_NONE|ssl\._create_unverified_context)",
     ),
     (
@@ -162,7 +163,7 @@ _RULE_TUPLES = [
         "data",
         "medium",
         "Sensitive data logged / printed",
-        r"(?i)\b(?:logger|log|logging?\.)?\.?(?:debug|info|warning|error)\(\s*(?:f[\'\"])?[^\'\"\n]*(?:password|token|secret|api_key|credit_card)\w*|"
+        r"(?i)\b(?:logger|log|logging?\.)?\.?(?:debug|info|warning|error)\(\s*(?:f[\'\"])?[^\n]*?(?:password|token|secret|api_key|credit_card)\w*|"
         r"\bprint\s*\([^\n]*(?:password|token|secret|api_key|credit_card)\w*",
     ),
     (
@@ -178,7 +179,7 @@ _RULE_TUPLES = [
         "behavior",
         "medium",
         "Exception handling changed / swallowed",
-        r"(?i)\bexcept\s+(?:Exception|BaseException)?\s*(?:as\s+\w+)?\s*:\s*(?:pass|return\s+None)\b|"
+        r"(?i)\bexcept\s+[^\n:]*?:\s*(?:pass|return\s+None)\b|"
         r"(?<!\w)\bpass\b[^\n]*$",
     ),
     (

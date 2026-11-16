@@ -65,6 +65,44 @@ def test_dependency_rule_fires_on_unquoted_requirements_pins():
     assert "flask" not in lines, "an unpinned dependency must not match"
 
 
+def test_tls_verify_cert_none_and_check_hostname_flagged():
+    """R003 catches the idiomatic stdlib TLS-disable assignments."""
+    src = (
+        "ctx.verify_mode = ssl.CERT_NONE\n"
+        "ctx.check_hostname = False\n"
+        "ctx.verify_mode = ssl.CERT_REQUIRED\n"  # safe: must NOT fire
+        "res = requests.get(url, verify=True)\n"  # safe
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i.line for i in issues if i.rule_id == "R003"]
+    assert hits == [1, 2], f"R003 fired on safe TLS lines: {hits}"
+
+
+def test_sensitive_logging_flags_keyword_in_arguments():
+    """D003 catches a secret named in the logging arguments, not just the format."""
+    src = (
+        'logging.debug("password hash = %s", h)\n'
+        'logger.info("login ok tok=%s", token)\n'
+        'logger.info("done")\n'  # clean
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i.line for i in issues if i.rule_id == "D003"]
+    assert hits == [1, 2], f"D003 line mismatch: {hits}"
+
+
+def test_swallowed_exception_with_named_type_flagged():
+    """B001 flags `except <Type> as e: return None`, not just bare Exception."""
+    src = (
+        "except ValueError as e: return None\n"
+        "except (KeyError, IOError) as e: return None\n"
+        "except Exception: return 5\n"  # not a swallow — must NOT fire
+        "except TypeError as e: raise\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i.line for i in issues if i.rule_id == "B001"]
+    assert hits == [1, 2], f"B001 line mismatch: {hits}"
+
+
 def test_sql_rule_does_not_fire_on_plain_modulo():
     """R005 must only flag SQL strings built with the % operator.
 
