@@ -1,0 +1,2805 @@
+prcheck V1.0 源代码（按 A4 纵向、宋体五号、每页 50 行排版）
+========================================================
+软件名称：prcheck（PR 安全清单与 OpenAPI 变更门禁分析工具）  版本号：V1.0
+源程序总量：2624 行（其中有效代码（去除空行与注释后）约 2637 行），本申请共提交 53 页。
+排版说明：每页第一行为页眉『prcheck V1.0』（左对齐），随后为 50 行源代码，
+最后一行为页脚页码。请使用 A4 纵向纸、正文宋体五号（10.5 磅）、页边距上下 2.54cm 打印。
+源代码按模块顺序节选如下（prcheck/ 核心引擎 + action/ GitHub 集成）：
+========================================================
+
+
+prcheck V1.0
+"""prcheck - PR security checklist + OpenAPI changelog for GitHub reviews."""
+
+__version__ = "0.5.0"
+# ===== prcheck/__main__.py =====
+"""Allow ``python -m prcheck``."""
+
+from .cli import main
+
+raise SystemExit(main())
+# ===== prcheck/issues.py =====
+"""Issue (checklist finding) data model and severities/triaging."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+SEVERITY_ORDER = {"info": 0, "low": 1, "medium": 2, "high": 3}
+
+CATEGORY_LABELS = {
+    "security": "Security",
+    "data": "Data",
+    "behavior": "Behavior",
+}
+
+
+@dataclass
+class Issue:
+    """A single checklist finding referenced to ``path:line``."""
+
+    rule_id: str
+    category: str            # security | data | behavior
+    severity: str            # info | low | medium | high
+    summary: str
+    path: str
+    line: int
+    snippet: str = ""
+    hint: str = ""
+    refs: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_rule(cls, rule, path: str, line: int, snippet: str) -> "Issue":
+        return cls(
+            rule_id=rule.id,
+            category=rule.category,
+            severity=rule.severity,
+            summary=rule.summary,
+            path=path,
+            line=line,
+            snippet=snippet[:200],
+第 1 页
+
+prcheck V1.0
+            hint=rule.hint,
+        )
+
+    @property
+    def location(self) -> str:
+        return f"{self.path}:{self.line}"
+
+    def sev_rank(self) -> int:
+        return SEVERITY_ORDER.get(self.severity, 0)
+
+
+def severity_filter(issues: list[Issue], min_severity: str = "info") -> list[Issue]:
+    rank = SEVERITY_ORDER.get(min_severity, 0)
+    return [i for i in issues if i.sev_rank() >= rank]
+
+
+def filter_issues(
+    issues: list[Issue],
+    *,
+    security_only: bool = False,
+    data_only: bool = False,
+    behavior_only: bool = False,
+    min_severity: str = "info",
+) -> list[Issue]:
+    """Apply category + minimum-severity filters.
+
+    This is the single filter entry point shared by the CLI, the GitHub Action
+    and the webhook bridge, so all entry points honor identical filtering.
+    """
+    rank = SEVERITY_ORDER.get(min_severity, 0)
+    out: list[Issue] = []
+    for i in issues:
+        if security_only and i.category != "security":
+            continue
+        if data_only and i.category != "data":
+            continue
+        if behavior_only and i.category != "behavior":
+            continue
+        if SEVERITY_ORDER.get(i.severity, 0) < rank:
+            continue
+        out.append(i)
+    return out
+
+
+def group_by_category(issues: list[Issue]) -> dict[str, list[Issue]]:
+    from .issues import CATEGORY_LABELS
+
+    out: dict[str, list[Issue]] = {c: [] for c in CATEGORY_LABELS}
+    for i in issues:
+        out.setdefault(i.category, []).append(i)
+第 2 页
+
+prcheck V1.0
+    return out
+
+
+def summary_table(issues: list[Issue]) -> dict[str, dict[str, int]]:
+    """{category: {severity: count}} for the report head."""
+    out: dict[str, dict[str, int]] = {}
+    for i in issues:
+        c = out.setdefault(i.category, {"info": 0, "low": 0, "medium": 0, "high": 0})
+        if i.severity not in c:
+            c[i.severity] = 0
+        c[i.severity] += 1
+    return out
+# ===== prcheck/rules.py =====
+"""Local rule engine: diff -> security / data / behavior checklist findings.
+
+Every rule produces :class:`Finding` objects that carry a category
+(security | data | behavior), a fixed severity (info/low/medium/high),
+a human-readable summary, and one or more ``file:line`` citations.
+
+Rules are pure local logic (regex / token heuristics) so the tool runs with
+zero network access and no training data.
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import re
+from dataclasses import dataclass
+from typing import Iterable
+
+from .diff import FileDiff, parse_diff
+from .issues import Issue
+
+# -------------------------------------------------------------------------
+# rule definitions
+# -------------------------------------------------------------------------
+
+# (id, category, severity, summary, pattern, hint)
+_RULE_TUPLES = [
+    (
+        "R001-a",
+        "security",
+        "high",
+        "No-auth / new public route detected",
+        r"@(?:app|bp|blueprint)\.(?:route|get|post|put|delete|patch|head|options)"
+        r"\s*\(\s*[\'\"][^\'\"\n]*[\'\"]\s*(?:,[^)\n]*)?\)",
+        "New unauth'd endpoint",
+    ),
+    (
+        "R001-b",
+第 3 页
+
+prcheck V1.0
+        "security",
+        "medium",
+        "New route — verify authentication guard",
+        r"@\S+\.route\([^)]*\)|@\S+\.(?:get|post|put|delete|patch)\(",
+        "Route decorator - check auth",
+    ),
+    (
+        "R002",
+        "security",
+        "high",
+        "Hardcoded credential/key/secret in diff",
+        r"(?i)\b(?:api[_-]?key|secret|token|passw(?:ord|d)|password|credential|pwd|auth[_-]?key|private[_-]?key)\b"
+        r"\s*(?:=|:)\s*[\"\'][A-Za-z0-9_@#$%^&*+!./\\-]{6,}[\"\']",
+        "Possible secret committed",
+    ),
+    (
+        "R003",
+        "security",
+        "medium",
+        "TLS / certificate check disabled",
+        r"(?i)(?:verify\s*=\s*False|ssl_verify_disabled|CURLOPT_SSL_VERIFYPEER\s*,\s*0"
+        r"|SSL_CERT_REQUIRED\s*=\s*CERT_NONE|ssl\._create_unverified_context)",
+    ),
+    (
+        "R004",
+        "security",
+        "medium",
+        "eval / exec / pickling of untrusted input",
+        r"(?i)\b(?:eval|exec|compile)\s*\(|pickle\.loads\(|yaml\.unsafe_load\(|dill\.loads\(|joblib\.load\(",
+    ),
+    (
+        "R005",
+        "security",
+        "medium",
+        "Potential SQL injection (string-built queries)",
+        r"(?i)\b(?:execute|executemany|query)\(\s?(?:f[\'\"])|"
+        r"(?:\"[^\"]*\{[^\"]*\}\")?\s*%|"
+        r"(?:SELECT|INSERT|UPDATE|DELETE)[^\n;]*\+[^\n;]*|"
+        r"(?:SELECT|INSERT|UPDATE|DELETE)[^\n;]*\b(?:\.format\(|f[\'\"])",
+    ),
+    (
+        "R006-deps",
+        "security",
+        "medium",
+        "Dependency added / changed",
+        # "name": "1.2.3",  or  "name": ">=1.0,<2",  (package.json / requirements style)
+        r"^\s*[\"\'][A-Za-z0-9_.\-]+[\"\']\s*:\s*[\"\'][^\"\']*[\d][^\"\']*[\"\']\s*,?\s*$|"
+        # "name>=1.0", "name>=1.0.0", "name==1.2", "name ~= 3"  (pyproject style)
+        r"^\s*[\"\'][A-Za-z0-9_.\-]+[\>\=\<\~\!\^]{1,2}[\d\.]+[\"\']?\s*,?\s*$|"
+        # name>=1.0,  name~=2.1,  name == 3.0   (unquoted requirements.txt pins)
+第 4 页
+
+prcheck V1.0
+        r"^\s*[A-Za-z0-9_.\-]+\s*(?:>=|<=|==|~=|!=|>|<|\^)\s*\d[\dA-Za-z._\-,\[\]~!^<>= ]*\s*(?:#.*)?$",
+    ),
+    (
+        "R007-cors",
+        "security",
+        "medium",
+        "CORS policy configured / relaxed",
+        r"(?i)\b(?:CORS|cors_origins?|allow_origins?|Access-Control-Allow-Origin)\b",
+    ),
+    (
+        "R008",
+        "security",
+        "high",
+        "Privilege / authorization logic changed",
+        r"(?i)\b(?:is_admin|can_access|authorize|permission|current_user\.role|requires_role|admin_required|rbac)\b",
+    ),
+    (
+        "R009",
+        "security",
+        "medium",
+        "IDOR risk: object ids exposed in request path/query",
+        r"(?i)\b(?:get_note|get_user|get_org|all_\w+_by_user|\.find_by_user)?\b(?:user_id|org_id|account_id)"
+        r"\s*[=:]\s*[\w.\']+\b",
+    ),
+    (
+        "R010",
+        "security",
+        "low",
+        "Insecure http URL used",
+        r"(?i)\bhttp://[^\s\"\'\\)]+",
+    ),
+    (
+        "R011-session",
+        "security",
+        "medium",
+        "SESSION_COOKIE_SECURE / SameSite relaxed or removed",
+        r"(?i)\bsession_cookie_(?:secure|httponly)\s*=\s*(?:False|None)\b|SameSite\s*=\s*None",
+    ),
+    # ---- data -----------------------------------------------------
+    (
+        "D001",
+        "data",
+        "low",
+        "New PII field added to model/schema",
+        r"(?i)\b(?:email|phone|ssn|passport|address|credit_card|card_number|birth[_-]?date|health[_-]?data)\b",
+    ),
+    (
+        "D002-db",
+        "data",
+        "medium",
+第 5 页
+
+prcheck V1.0
+        "Database schema / migration change",
+        r"(?i)\b(?:create_table|add_column|migration|ALTER\s+TABLE|DROP\s+TABLE|add_foreign_key)\b",
+    ),
+    (
+        "D003",
+        "data",
+        "medium",
+        "Sensitive data logged / printed",
+        r"(?i)\b(?:logger|log|logging?\.)?\.?(?:debug|info|warning|error)\(\s*(?:f[\'\"])?[^\'\"\n]*(?:password|token|secret|api_key|credit_card)\w*|"
+        r"\bprint\s*\([^\n]*(?:password|token|secret|api_key|credit_card)\w*",
+    ),
+    (
+        "D004",
+        "data",
+        "medium",
+        "Data removed / destructive change",
+        r"(?i)\b(?:removed?\s+(?:field|column|endpoint)|DROP\s+TABLE|DROP\s+COLUMN|DELETE\s+FROM)\b",
+    ),
+    # ---- behavior -----------------------------------------------------
+    (
+        "B001",
+        "behavior",
+        "medium",
+        "Exception handling changed / swallowed",
+        r"(?i)\bexcept\s+(?:Exception|BaseException)?\s*(?:as\s+\w+)?\s*:\s*(?:pass|return\s+None)\b|"
+        r"(?<!\w)\bpass\b[^\n]*$",
+    ),
+    (
+        "B002",
+        "behavior",
+        "low",
+        "Retry/timeout/time config changed",
+        r"(?i)\b(?:timeout|retries?|max_retries)\s*\=\s*\d+",
+    ),
+    (
+        "B003",
+        "behavior",
+        "medium",
+        "HTTP status / response code change",
+        r"(?i)\b(?:status_code|status|HTTP_)(?:\s*\=|\s*:\s*)\s*\d{3}\b|"
+        r"\b(?:return|raise).{0,40}\b(?:404|403|500|502)\b",
+    ),
+    (
+        "B004",
+        "behavior",
+        "medium",
+        "New library/import affecting behavior",
+        r"^\s*(?:import|from)\s+[\w.]+",
+    ),
+    (
+第 6 页
+
+prcheck V1.0
+        "B005",
+        "behavior",
+        "low",
+        "System-level call changed",
+        r"(?i)\b(?:chmod|chown|umask|subprocess|Popen|kill|restart)\b",
+    ),
+]
+
+_PATTERN_CACHE: dict[str, re.Pattern] = {}
+
+def _pat(pattern: str) -> re.Pattern:
+    if pattern not in _PATTERN_CACHE:
+        _PATTERN_CACHE[pattern] = re.compile(pattern)
+    return _PATTERN_CACHE[pattern]
+
+
+@dataclass(frozen=True)
+class Rule:
+    id: str
+    category: str
+    severity: str
+    summary: str
+    pattern: str
+    hint: str = ""
+
+    @property
+    def regex(self) -> re.Pattern:
+        return _pat(self.pattern)
+
+
+RULES: dict[str, Rule] = {t[0]: Rule(*t) for t in _RULE_TUPLES}
+
+
+# -------------------------------------------------------------------------
+# matching engine
+# -------------------------------------------------------------------------
+
+# all rules are active by default (rules.py is the single source of truth)
+def _match_single_line(rule: Rule, line_text: str) -> bool:
+    return bool(rule.regex.search(line_text))
+
+
+def run_rules(files: Iterable[FileDiff], opts=None) -> list[Issue]:
+    """Run all rules over parsed diff files and build the finding list."""
+    del opts
+    issues: list[Issue] = []
+    for fd in files:
+        path = fd.new_path or fd.old_path
+        if not path:
+            continue
+第 7 页
+
+prcheck V1.0
+        if _should_skip_path(path):
+            continue
+        for lineno, text in fd.added_texts():
+            for rule in RULES.values():
+                if _should_skip_rule(path, rule):
+                    continue
+                if _match_single_line(rule, text):
+                    issues.append(
+                        Issue.from_rule(rule, path, lineno, text.strip())
+                    )
+    return issues
+
+
+def _should_skip_path(path: str) -> bool:
+    """Never flag lockfiles or vendored data files."""
+    base = path.replace("\\", "/").split("/")[-1]
+    if base in ("Pipfile.lock", "poetry.lock", "yarn.lock", "package-lock.json",
+                "Cargo.lock", "go.sum", "composer.lock", "Gemfile.lock", "pnpm-lock.yaml"):
+        return True
+    if path.endswith((".min.js", ".min.css", ".map", ".svg", ".png", ".jpg", ".ico")):
+        return True
+    return False
+
+
+def _should_skip_rule(path: str, rule: Rule) -> bool:
+    """Apply per-rule path filters (e.g. deps rules only on lock/manifest)."""
+    p = path.replace("\\", "/").lower()
+    if rule.id == "R006-deps" and not any(
+        fnmatch.fnmatch(p, pat)
+        for pat in ("*.txt", "requirements*.txt", "pyproject.toml", "package.json", "setup.py")
+    ):
+        return True
+    return False
+
+
+def analyze_to_issues(diff_text: str) -> tuple[list[Issue], list[FileDiff]]:
+    """Parse diff text and directly produce issues (tests + CLI share this)."""
+    files = parse_diff(diff_text)
+    issues = run_rules(files)
+    return issues, files
+# ===== prcheck/diff.py =====
+"""Unified diff parser.
+
+Parses the output of ``git diff`` / ``gh pr diff`` into structured file/hunk
+objects with precise per-line numbers in the *new* file (used for
+``file:line`` citations in the generated checklist).
+"""
+
+from __future__ import annotations
+
+第 8 页
+
+prcheck V1.0
+import re
+from dataclasses import dataclass, field
+from typing import Iterator, Optional
+
+_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
+_GIT_HEADER_RE = re.compile(r"^diff --git ")
+_BINARY_RE = re.compile(r"^Binary files .* differ$")
+
+
+class DiffParseError(ValueError):
+    """Raised when a diff blob cannot be parsed at all."""
+
+
+@dataclass
+class DiffLine:
+    """A single line inside a parsed hunk body."""
+
+    kind: str  # "add" | "remove" | "context"
+    text: str  # line content without the +/-/space marker
+    new_lineno: Optional[int] = None  # line number in the NEW file
+    old_lineno: Optional[int] = None  # line number in the OLD file
+
+
+@dataclass
+class Hunk:
+    new_start: int
+    new_count: int
+    old_start: int
+    old_count: int
+    header: str
+    lines: list[DiffLine] = field(default_factory=list)
+
+    @property
+    def added(self) -> int:
+        return sum(1 for l in self.lines if l.kind == "add")
+
+    @property
+    def removed(self) -> int:
+        return sum(1 for l in self.lines if l.kind == "remove")
+
+
+@dataclass
+class FileDiff:
+    old_path: str = ""
+    new_path: str = ""
+    status: str = "modified"  # added | removed | modified | renamed | binary
+    hunks: list[Hunk] = field(default_factory=list)
+
+    @property
+    def added(self) -> int:
+第 9 页
+
+prcheck V1.0
+        return sum(h.added for h in self.hunks)
+
+    @property
+    def removed(self) -> int:
+        return sum(h.removed for h in self.hunks)
+
+    def added_lines(self) -> Iterator[DiffLine]:
+        """Yield added lines (with new-file line numbers)."""
+        for hunk in self.hunks:
+            for line in hunk.lines:
+                if line.kind == "add":
+                    yield line
+
+    def added_texts(self) -> Iterator[tuple[int, str]]:
+        for line in self.added_lines():
+            yield line.new_lineno or 0, line.text
+
+
+def _strip_path(raw: str) -> str:
+    """Turn ``b/src/x.py`` into ``src/x.py``; handle ``/dev/null``."""
+    raw = raw.strip()
+    if raw == "/dev/null":
+        return ""
+    # git mangles paths with spaces as `b/a b/file`; just strip the prefix.
+    if raw.startswith("a/") or raw.startswith("b/"):
+        return raw[2:]
+    return raw
+
+
+def parse_diff(text: str) -> list[FileDiff]:
+    """Parse a unified diff blob into :class:`FileDiff` objects."""
+    files: list[FileDiff] = []
+    cur: Optional[FileDiff] = None
+    cur_hunk: Optional[Hunk] = None
+    new_no = old_no = 0
+    saw_hunk = False
+
+    for raw in text.splitlines():
+        # --- headers ---------------------------------------------------
+        if _GIT_HEADER_RE.match(raw):
+            cur = FileDiff()
+            files.append(cur)
+            cur_hunk = None
+            continue
+        if raw.startswith("--- "):
+            if cur is None:
+                cur = FileDiff()
+                files.append(cur)
+            cur.old_path = _strip_path(raw[4:])
+            continue
+第 10 页
+
+prcheck V1.0
+        if raw.startswith("+++ "):
+            if cur is None:
+                cur = FileDiff()
+                files.append(cur)
+            cur.new_path = _strip_path(raw[4:])
+            continue
+        if raw.startswith("new file mode") or raw.startswith("new mode"):
+            if cur is not None:
+                cur.status = "added"
+            continue
+        if raw.startswith("deleted file mode") or raw.startswith("old mode"):
+            if cur is not None:
+                cur.status = "removed"
+            continue
+        if raw.startswith("rename from ") or raw.startswith("rename to "):
+            if cur is not None:
+                cur.status = "renamed"
+            continue
+        if _BINARY_RE.match(raw):
+            if cur is not None:
+                cur.status = "binary"
+            continue
+        if raw.startswith("\\ No newline") or raw.startswith("index ") \
+                or raw.startswith("similarity ") or raw.startswith("dissimilarity "):
+            continue
+        if raw.startswith("@@ "):
+            m = _HUNK_RE.match(raw)
+            if not m:
+                continue
+            old_start = int(m.group(1))
+            old_count = int(m.group(2) or "1")
+            new_start = int(m.group(3))
+            new_count = int(m.group(4) or "1")
+            hdr = m.group(5) or ""
+            cur_hunk = Hunk(new_start, new_count, old_start, old_count, hdr)
+            if cur is None:
+                cur = FileDiff()
+                files.append(cur)
+            cur.hunks.append(cur_hunk)
+            new_no = new_start
+            old_no = old_start
+            saw_hunk = True
+            continue
+
+        # --- hunk body ---------------------------------------------------
+        if cur_hunk is None:
+            # A stray context line outside any hunk (e.g. no-newline marker).
+            continue
+        if saw_hunk:
+            if raw.startswith("+"):
+第 11 页
+
+prcheck V1.0
+                cur_hunk.lines.append(DiffLine("add", raw[1:], new_no, None))
+                new_no += 1
+            elif raw.startswith("-"):
+                cur_hunk.lines.append(DiffLine("remove", raw[1:], None, old_no))
+                old_no += 1
+            elif raw.startswith(" ") or raw == "":
+                cur_hunk.lines.append(DiffLine("context", raw[1:] if raw else "", new_no, old_no))
+                new_no += 1
+                old_no += 1
+
+    # Normalize status based on paths (headers are not always present).
+    for fd in files:
+        if not fd.old_path and (fd.status == "modified" and fd.hunks):
+            fd.status = "added"
+        if not fd.new_path:
+            fd.status = "removed"
+    return files
+
+
+def compute_stats(files: list[FileDiff]) -> dict:
+    """Aggregate files-changed / insertions / deletions counters."""
+    return {
+        "files_changed": len([f for f in files if f.status not in ("binary",) or f.hunks]),
+        "insertions": sum(f.added for f in files),
+        "deletions": sum(f.removed for f in files),
+        "files": [
+            {
+                "path": f.new_path or f.old_path,
+                "status": f.status,
+                "added": f.added,
+                "removed": f.removed,
+            }
+            for f in files
+        ],
+    }
+# ===== prcheck/openapi.py =====
+"""OpenAPI changelog: semantic diff of two OpenAPI v2/v3 specs.
+
+Parsed with PyYAML (safe). Reports:
+
+* endpoint added / removed / modified
+* operation-level summary change
+* parameter added / removed / required / schema-change
+* schema (component) added / removed / modified, with attribute-level detail
+
+The ``breaking`` flag drives version inference:
+
+* major bump  -> any breaking change
+* minor bump  -> endpoints/params/schemas added (non-breaking additions)
+* patch bump  -> descriptive-only changes
+第 12 页
+
+prcheck V1.0
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
+
+import yaml
+
+# -------------------------------------------------------------------------
+# spec loading (v2 / v3 friendly)
+# -------------------------------------------------------------------------
+
+
+class SpecVersion(Enum):
+    SWAGGER_2 = "swagger2"
+    OPENAPI_3 = "openapi3"
+
+
+@dataclass
+class Spec:
+    raw: dict
+    version: SpecVersion
+    source: str = ""
+
+    @property
+    def info(self) -> dict:
+        return self.raw.get("info", {}) or {}
+
+    @property
+    def title(self) -> str:
+        return str(self.info.get("title", ""))
+
+    @property
+    def version_string(self) -> str:
+        return str(self.info.get("version", ""))
+
+    def paths(self) -> dict:
+        paths = self.raw.get("paths", {})
+        return paths if isinstance(paths, dict) else {}
+
+    def components_schemas(self) -> dict:
+        if self.version == SpecVersion.OPENAPI_3:
+            schemas = ((self.raw.get("components") or {}).get("schemas") or {}) or {}
+        else:
+            schemas = self.raw.get("definitions") or {}
+        return schemas if isinstance(schemas, dict) else {}
+
+第 13 页
+
+prcheck V1.0
+    def iter_operations(self):
+        """Yield (path, http_method, operation_dict)."""
+        paths = self.paths()
+        for path, item in paths.items():
+            if not isinstance(item, dict):
+                continue
+            for method in ("get", "post", "put", "patch", "delete", "head", "options"):
+                op = item.get(method)
+                if isinstance(op, dict):
+                    yield path, method, op
+
+
+def load_spec(text: str, source: str = "") -> Spec:
+    """Parse + basic-validate a spec; accept both swagger/oas dict shapes."""
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        raise ValueError(f"invalid YAML in {source or 'spec'}: {e}") from e
+    if not isinstance(data, dict):
+        raise ValueError(f"{source or 'spec'} is not a mapping")
+
+    if isinstance(data.get("openapi"), str):
+        version = SpecVersion.OPENAPI_3
+    elif isinstance(data.get("swagger"), str):
+        version = SpecVersion.SWAGGER_2
+    else:
+        raise ValueError(
+            f"{source or 'spec'}: missing 'openapi'/'swagger' version field"
+        )
+
+    # Guard against structurally invalid docs: `paths` (and, for v3,
+    # `components.schemas`) must be maps when present. A doc where these are
+    # lists/scalars cannot be diffed meaningfully, so fail loudly instead of
+    # silently emitting an empty changelog in CI.
+    paths = data.get("paths")
+    if paths is not None and not isinstance(paths, dict):
+        raise ValueError(
+            f"{source or 'spec'}: 'paths' must be a mapping, got {type(paths).__name__}"
+        )
+    if version == SpecVersion.OPENAPI_3:
+        components = data.get("components")
+        if components is not None:
+            if not isinstance(components, dict):
+                raise ValueError(
+                    f"{source or 'spec'}: 'components' must be a mapping, "
+                    f"got {type(components).__name__}"
+                )
+            schemas = components.get("schemas")
+            if schemas is not None and not isinstance(schemas, dict):
+                raise ValueError(
+第 14 页
+
+prcheck V1.0
+                    f"{source or 'spec'}: 'components.schemas' must be a mapping, "
+                    f"got {type(schemas).__name__}"
+                )
+    else:
+        definitions = data.get("definitions")
+        if definitions is not None and not isinstance(definitions, dict):
+            raise ValueError(
+                f"{source or 'spec'}: 'definitions' must be a mapping, "
+                f"got {type(definitions).__name__}"
+            )
+    return Spec(data, version, source)
+
+
+# -------------------------------------------------------------------------
+# change model
+# -------------------------------------------------------------------------
+
+
+@dataclass
+class Change:
+    kind: str          # "endpoint" | "parameter" | "schema" | "operation" | "info"
+    path: str = ""
+    method: str = ""
+    schema: str = ""
+    detail: str = ""
+    summary: str = ""
+    breaking: bool = False
+    severity: str = "low"
+    auxiliary: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.kind,
+            "path": self.path or None,
+            "method": self.method or None,
+            "schema": self.schema or None,
+            "detail": self.detail or None,
+            "summary": self.summary,
+            "breaking": self.breaking,
+            "severity": self.severity,
+        }
+
+
+def _method_label(method: str) -> str:
+    return method.upper() if method else ""
+
+
+def _summarize_endpoint(method: str, path: str, op: dict) -> str:
+    s = op.get("summary") or op.get("operationId") or ""
+    return f"{_method_label(method)} {path} — {s}".strip()
+第 15 页
+
+prcheck V1.0
+
+# -------------------------------------------------------------------------
+# comparison engine
+# -------------------------------------------------------------------------
+
+
+def _deep_equals(a: Any, b: Any) -> bool:
+    return json.dumps(a, sort_keys=True, default=str) == json.dumps(
+        b, sort_keys=True, default=str
+    )
+
+
+def _param_schema(np: dict) -> dict:
+    """Effective parameter schema: OAS3 uses `schema`, swagger2 uses `type`."""
+    if isinstance(np.get("type"), str):  # swagger 2 data type declared inline
+        schema = np.get("schema")
+        return schema if isinstance(schema, dict) else {"type": np["type"]}
+    schema = np.get("schema")
+    return schema if isinstance(schema, dict) else {}
+
+
+def compare_params(old_op: dict, new_op: dict, path: str, method: str) -> list[Change]:
+    old_ps = old_op.get("parameters") or []
+    new_ps = new_op.get("parameters") or []
+    changes: list[Change] = []
+    old_by = {_pkey(p): p for p in old_ps}
+    new_by = {_pkey(p): p for p in new_ps}
+
+    for key, np_ in new_by.items():
+        op = old_by.get(key)
+        if op is None:
+            changes.append(
+                Change(
+                    kind="parameter",
+                    path=path,
+                    method=method,
+                    detail=f"parameter `{key}` added",
+                    summary=f"parameter `{key}` added",
+                    breaking=False,
+                    severity="low",
+                )
+            )
+            continue
+        # same param exists: check required/schema
+        if op.get("required") != np_.get("required"):
+            if np_.get("required") and op.get("required") is not True:
+                changes.append(
+                    Change(
+                        kind="parameter",
+                        path=path,
+第 16 页
+
+prcheck V1.0
+                        method=method,
+                        detail="required flag flipped",
+                        summary=f"parameter `{key}` is now required",
+                        breaking=True,
+                        severity="high",
+                    )
+                )
+        ns, os_ = _param_schema(np_), _param_schema(op)
+        if ns and os_ and not _deep_equals(ns, os_):
+            changes.append(
+                Change(
+                    kind="parameter",
+                    path=path,
+                    method=method,
+                    detail="schema changed",
+                    summary=f"parameter `{key}` schema type/schema changed",
+                    breaking=_param_schema_breaking(ns, os_),
+                    severity="medium",
+                )
+            )
+    # removed
+    for key, op in old_by.items():
+        if key not in new_by:
+            changes.append(
+                Change(
+                    kind="parameter",
+                    path=path,
+                    method=method,
+                    detail="parameter removed",
+                    summary=f"parameter `{key}` removed",
+                    breaking=True,
+                    severity="medium",
+                )
+            )
+    return changes
+
+
+def _pkey(p: dict) -> str:
+    # parameter identity is (name, location) so path/query/header params with
+    # the same name are not conflated
+    return f'{(p.get("in") or "query")}:{(p.get("name") or "")}'
+
+
+def _param_schema_breaking(ns: dict, os_: dict) -> bool:
+    """True when a consumer sending the old value would now be invalid."""
+    ns = ns or {}
+    os_ = os_ or {}
+    if ns.get("type") and os_.get("type"):
+        return ns["type"] != os_["type"]
+    if "$ref" in ns and "$ref" in os_:
+第 17 页
+
+prcheck V1.0
+        return ns["$ref"] != os_["$ref"]
+    if ns.get("type") and not os_.get("type") and os_.get("$ref"):
+        return True
+    return False
+
+
+def _compare_schema_attrs(old: dict, new: dict) -> list[tuple[str, Any, Any]]:
+    """Yield (propertyOrKey, oldVal, newVal) for changed primitive props.
+
+    ``properties``/``required`` are reported at property level below, so they
+    are skipped here to avoid duplicating (and mis-classifying) the whole-map
+    comparison as a flat attribute change.
+    """
+    out = []
+    for k in set(old) | set(new):
+        if k in ("description", "example", "default", "properties", "required"):
+            continue
+        if k in old and k in new and not _deep_equals(old[k], new[k]):
+            out.append((k, old[k], new[k]))
+    return out
+
+
+def compare_schemas(old: Spec, new: Spec) -> list[Change]:
+    old_s = old.components_schemas()
+    new_s = new.components_schemas()
+    changes: list[Change] = []
+    for name, ns in new_s.items():
+        if name not in old_s:
+            changes.append(
+                Change("schema", schema=name, summary=f"schema `{name}` added", breaking=False)
+            )
+            continue
+        os_ = old_s[name]
+        # attribute-level diff
+        for attr, old_v, new_v in _compare_schema_attrs(os_, ns):
+            changes.append(
+                Change(
+                    "schema",
+                    schema=name,
+                    detail=attr,
+                    summary=f"schema `{name}`: attribute `{attr}` changed",
+                    breaking=_attr_breaking(attr, old_v, new_v),
+                    severity="medium",
+                )
+            )
+        # property add/remove/change
+        old_props = (os_.get("properties") or {})
+        new_props = (ns.get("properties") or {})
+        old_required = set(os_.get("required") or [])
+        new_required = set(ns.get("required") or [])
+第 18 页
+
+prcheck V1.0
+        for prop in sorted(new_required - old_required):
+            changes.append(
+                Change(
+                    "schema",
+                    schema=name,
+                    detail=prop,
+                    summary=f"schema `{name}`: property `{prop}` is now required",
+                    breaking=True,
+                    severity="high",
+                )
+            )
+        for prop, val in new_props.items():
+            if prop not in old_props:
+                changes.append(
+                    Change(
+                        "schema",
+                        schema=name,
+                        detail=prop,
+                        summary=f"schema `{name}`: property `{prop}` added",
+                        breaking=False,
+                    )
+                )
+            elif old_props[prop] != val:
+                changes.append(
+                    Change(
+                        "schema",
+                        schema=name,
+                        detail=prop,
+                        summary=f"schema `{name}`: property `{prop}` modified",
+                        breaking=_prop_breaking(old_props[prop], val),
+                        severity="medium",
+                    )
+                )
+        for prop in old_props:
+            if prop not in new_props:
+                changes.append(
+                    Change(
+                        "schema",
+                        schema=name,
+                        detail=prop,
+                        summary=f"schema `{name}`: property `{prop}` removed",
+                        breaking=True,
+                        severity="medium",
+                    )
+                )
+    for name in old_s:
+        if name not in new_s:
+            changes.append(
+                Change("schema", schema=name, summary=f"schema `{name}` removed", breaking=True)
+            )
+第 19 页
+
+prcheck V1.0
+    return changes
+
+
+def _attr_breaking(attr: str, old_v: Any, new_v: Any) -> bool:
+    if attr in ("type", "required", "enum"):
+        return True
+    if attr == "additionalProperties":
+        return bool(old_v) and not bool(new_v)
+    return False
+
+
+def _prop_breaking(old_prop: Any, new_prop: Any) -> bool:
+    """A property-level change is breaking when an old value becomes invalid."""
+    if not isinstance(old_prop, dict) or not isinstance(new_prop, dict):
+        return old_prop != new_prop and old_prop is not None
+    if "type" in old_prop and "type" in new_prop:
+        return old_prop["type"] != new_prop["type"]
+    if "$ref" in old_prop and "$ref" in new_prop:
+        return old_prop["$ref"] != new_prop["$ref"]
+    # an unknown, non-primitive structural change is not classified as
+    # breaking by default (conservative)
+    return False
+
+
+def compare_specs(old: Spec, new: Spec) -> list[Change]:
+    """Full semantic diff between two parsed specs."""
+    changes: list[Change] = []
+    old_paths = old.paths()
+    new_paths = new.paths()
+
+    for path, item in new_paths.items():
+        for method, op in (item.items() if isinstance(item, dict) else []):
+            if method not in _HTTP_METHODS:
+                continue
+            old_path_item = old_paths.get(path)
+            old_op = None
+            if isinstance(old_path_item, dict):
+                old_op = old_path_item.get(method)
+            if old_op is None:
+                changes.append(
+                    Change(
+                        kind="endpoint",
+                        path=path,
+                        method=method,
+                        detail="endpoint added",
+                        summary=f"{_method_label(method)} {path} — endpoint added",
+                        breaking=False,
+                        severity="low",
+                    )
+                )
+第 20 页
+
+prcheck V1.0
+            else:
+                changes += compare_params(old_op, op, path, method)
+                ns = op.get("summary") or op.get("operationId") or ""
+                os_ = old_op.get("summary") or old_op.get("operationId") or ""
+                if ns != os_:
+                    changes.append(
+                        Change(
+                            kind="operation",
+                            path=path,
+                            method=method,
+                            detail="summary changed",
+                            summary=f"{_method_label(method)} {path} — summary changed",
+                            breaking=False,
+                            severity="info",
+                            auxiliary={"old": os_, "new": ns},
+                        )
+                    )
+
+    for path, item in old_paths.items():
+        for method in _HTTP_METHODS:
+            if isinstance(item, dict) and method in item:
+                if path not in new_paths or method not in (
+                    new_paths.get(path) or {}
+                ):
+                    changes.append(
+                        Change(
+                            kind="endpoint",
+                            path=path,
+                            method=method,
+                            detail="endpoint removed",
+                            summary=f"{_method_label(method)} {path} — endpoint removed",
+                            breaking=True,
+                            severity="high",
+                        )
+                    )
+
+    changes += compare_schemas(old, new)
+    return changes
+
+
+_HTTP_METHODS = ("get", "post", "put", "patch", "delete", "head", "options")
+
+
+def infer_semver(old_version: str, new_version: str, changes: list[Change]) -> dict:
+    """Suggest a version bump based on changes (semver-style)."""
+    breaking = any(c.breaking for c in changes)
+    added_nonbreaking = any(
+        not c.breaking and c.kind in ("endpoint", "parameter", "schema")
+        for c in changes
+    )
+第 21 页
+
+prcheck V1.0
+    suggestion = "patch"
+    if breaking:
+        suggestion = "major"
+    elif added_nonbreaking:
+        suggestion = "minor"
+
+    return {
+        "from": old_version,
+        "to": new_version,
+        "breaking_changes": breaking,
+        "changes_count": len(changes),
+        "suggested_bump": suggestion,
+    }
+
+
+# -------------------------------------------------------------------------
+# convenience API for CLI / action
+# -------------------------------------------------------------------------
+
+
+def diff_spec_text(old_text: str, new_text: str) -> tuple[list[dict], dict]:
+    """High-level: parse two raw spec texts; return (change_dicts, semver)."""
+    old = load_spec(old_text, "old")
+    new = load_spec(new_text, "new")
+    changes = compare_specs(old, new)
+    semver = infer_semver(old.version_string, new.version_string, changes)
+    return [c.to_dict() for c in changes], semver
+# ===== prcheck/engine.py =====
+"""Shared analysis pipeline: diff rules + OpenAPI changelog.
+
+Used by the CLI, the GitHub Action and the (optional) webhook bridge so the
+rule set and the semver inference never drift between entry points.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from .diff import compute_stats, parse_diff
+from .issues import Issue, filter_issues
+from .openapi import compare_specs, infer_semver, load_spec
+
+
+@dataclass
+class AnalysisResult:
+    issues: list[Issue] = field(default_factory=list)
+    stat: dict = field(default_factory=dict)
+    openapi_changes: list[dict] = field(default_factory=list)
+    semver: dict | None = None
+
+第 22 页
+
+prcheck V1.0
+    def as_dict(self) -> dict:
+        return {
+            "issues": [i.__dict__ for i in self.issues],
+            "stat": self.stat,
+            "openapi": self.openapi_changes,
+            "semver": self.semver,
+        }
+
+
+def run_analysis(
+    diff_text: str,
+    *,
+    base_spec_text: str | None = None,
+    new_spec_text: str | None = None,
+    base_spec_name: str = "",
+    new_spec_name: str = "",
+    security_only: bool = False,
+    data_only: bool = False,
+    behavior_only: bool = False,
+    min_severity: str = "info",
+) -> AnalysisResult:
+    """Run the rules engine and (optionally) the OpenAPI changelog."""
+    from .rules import run_rules
+
+    files = parse_diff(diff_text)
+    issues = run_rules(files)
+    issues = filter_issues(
+        issues,
+        security_only=security_only,
+        data_only=data_only,
+        behavior_only=behavior_only,
+        min_severity=min_severity,
+    )
+    stat = compute_stats(files)
+
+    openapi_changes: list[dict] = []
+    semver: dict | None = None
+    if base_spec_text is not None and new_spec_text is not None:
+        old_s = load_spec(base_spec_text, base_spec_name or "old")
+        new_s = load_spec(new_spec_text, new_spec_name or "new")
+        changes = compare_specs(old_s, new_s)
+        openapi_changes = [c.to_dict() for c in changes]
+        semver = infer_semver(old_s.version_string, new_s.version_string, changes)
+
+    return AnalysisResult(
+        issues=issues,
+        stat=stat,
+        openapi_changes=openapi_changes,
+        semver=semver,
+    )
+第 23 页
+
+prcheck V1.0
+# ===== prcheck/cache.py =====
+"""Content-addressed analysis cache.
+
+Requirement #6: "same base is not re-analyzed". The engine is a pure function
+of (diff text, OpenAPI specs, filter options), so we key roughly on a SHA-256
+of those inputs. On a cache hit we replay the stored JSON payload instead of
+re-parsing the diff and re-running rules.
+
+Cache location: ``--cache-dir`` (default ``.prcheck-cache``). Set
+``--no-cache`` to disable.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+
+# Bump whenever the rule engine / OpenAPI comparison changes in a way that
+# changes output for the same input; stale cache entries then simply miss.
+# 7: cache payload schema moved from findings/stats to issues/stat (shared
+#    engine), and the CLI now runs through prcheck/engine.run_analysis().
+ENGINE_VERSION = "7"
+
+
+def _hash(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
+
+
+def payload_key(diff_text: str, spec_texts: list[str], option_tag: str) -> str:
+    raw = "\x00".join([ENGINE_VERSION, diff_text, *spec_texts, option_tag])
+    return _hash(raw)
+
+
+class AnalysisCache:
+    """Simple JSON cache keyed on input content hashes."""
+
+    def __init__(self, cache_dir: str | Path | None, enabled: bool = True):
+        self.enabled = enabled
+        if not enabled or not cache_dir:
+            self.dir: Path | None = None
+            return
+        self.dir = Path(cache_dir)
+        os.makedirs(self.dir, exist_ok=True)
+
+    def _path(self, key: str) -> Path:
+        assert self.dir is not None
+        return self.dir / f"{key}.json"
+
+第 24 页
+
+prcheck V1.0
+    def get(self, key: str) -> dict | None:
+        if not self.enabled or self.dir is None:
+            return None
+        p = self._path(key)
+        if not p.exists():
+            return None
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    def put(self, key: str, payload: dict) -> None:
+        if not self.enabled or self.dir is None:
+            return
+        tmp = self._path(key).with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, self._path(key))
+
+    def hit(self, key: str) -> bool:
+        if not self.enabled or self.dir is None:
+            return False
+        return self._path(key).exists()
+# ===== prcheck/llm.py =====
+"""Optional LLM summarizer — default OFF.
+
+The design goal (per low-compute rule) is a local rules engine. This module
+provides an extensible stub that can summarize the structured findings. The
+default implementation is a deterministic "mock" that returns a canned summary,
+so CI and tests never require network access or model weights.
+
+Enable with ``--llm-summary``; pass custom prompt/hooks by subclassing
+:class:`Summarizer`.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Iterable
+
+from .issues import Issue
+
+
+@dataclass
+class Summarizer:
+    """Mock summarizer (default OFF in CLI)."""
+
+    enabled: bool = False
+
+    def summarize(self, issues: Iterable[Issue], stat: dict) -> str:
+        """Return a deterministic summary (mock; no LLM call made)."""
+第 25 页
+
+prcheck V1.0
+        issues = list(issues)
+        if not issues:
+            return "_No findings to summarize._"
+        high = [i for i in issues if i.severity == "high"]
+        security_high = [i for i in high if i.category == "security"]
+        lines = [
+            (
+                "Mock LLM summary: found "
+                f"{len(issues)} findings, {len(high)} high"
+                f" ({len(security_high)} security-high) in "
+                f"{stat.get('files_changed', '?')} changed files."
+            )
+        ]
+        for i in high[:5]:
+            lines.append(f"- HIGH {i.category}: {i.summary} @ {i.location}")
+        return "\n".join(lines)
+# ===== prcheck/render.py =====
+"""Rendering: Markdown report, SARIF 2.1.0, and plain text summary."""
+
+from __future__ import annotations
+
+import json
+from io import StringIO
+from typing import Iterable
+
+from .issues import CATEGORY_LABELS, Issue, group_by_category, summary_table
+
+_EMOJI = {"high": "🔴", "medium": "🟠", "low": "🟡", "info": "⚪"}
+
+# -------------------------------------------------------------------------
+# Markdown
+# -------------------------------------------------------------------------
+
+
+def render_markdown(
+    issues: Iterable[Issue],
+    *,
+    stat: dict | None = None,
+    openapi_changes: list | None = None,
+    high_blocked: bool = False,
+    include_blocker: bool = True,
+    generator_name: str = "prcheck",
+) -> str:
+    """Build a GitHub-flavored Markdown checklist report (PR comment ready)."""
+    issues = list(issues)
+    stat = stat or {}
+    buf = StringIO()
+    buf.write("## 🔒 PR Security & Data Checklist\n\n")
+    if stat:
+        buf.write(
+第 26 页
+
+prcheck V1.0
+            f"_Analyzed {stat.get('files_changed', 0)} files, "
+            f"+{stat.get('insertions', 0)} / -{stat.get('deletions', 0)} lines._\n\n"
+        )
+    counts = summary_table(issues)
+    if counts:
+        buf.write("| Category | High | Medium | Low | Info |\n")
+        buf.write("|---|---|---|---|---|\n")
+        for cat in CATEGORY_LABELS:
+            c = counts.get(cat)
+            if not c:
+                continue
+            buf.write(
+                f"| {CATEGORY_LABELS[cat]} | {c['high']} | {c['medium']} "
+                f"| {c['low']} | {c['info']} |\n"
+            )
+        buf.write("\n")
+
+    if openapi_changes:
+        _render_openapi(buf, openapi_changes)
+
+    by_cat = group_by_category(issues)
+    for cat in ("security", "data", "behavior"):
+        cat_issues = by_cat.get(cat, [])
+        if not cat_issues:
+            continue
+        buf.write(f"### {CATEGORY_LABELS[cat]} checklist\n\n")
+        buf.write(f"{len(cat_issues)} item(s) to review:\n\n")
+        for i in sorted(cat_issues, key=lambda x: (-x.sev_rank(), x.location)):
+            buf.write(
+                f"- [ ] {_EMOJI.get(i.severity, '')} [`{i.rule_id}`] "
+                f"**{i.summary}** — {i.location}\n"
+            )
+            if i.snippet:
+                buf.write(f"  ```text\n  {i.snippet}\n  ```\n")
+            if i.hint:
+                buf.write(f"  _hint: {i.hint}_\n")
+        buf.write("\n")
+
+    if not issues and not openapi_changes:
+        buf.write("No issues found.\n\n")
+
+    if high_blocked and include_blocker:
+        buf.write("> ⛔ **Gate: BLOCKED** — unresolved High-severity items "
+                  "must be resolved before merging.\n")
+    return buf.getvalue()
+
+
+def _render_openapi(buf: StringIO, changes: list) -> None:
+    """Emit the OpenAPI changelog section."""
+    breaking = [c for c in changes if c.get("breaking")]
+第 27 页
+
+prcheck V1.0
+    nonbreaking = [c for c in changes if not c.get("breaking")]
+    buf.write("### 🧭 OpenAPI changelog\n\n")
+    if breaking:
+        buf.write(f"**Breaking changes:** {len(breaking)}\n\n")
+        for c in breaking:
+            ref = c.get('path') or c.get('schema') or c.get('endpoint') or ''
+            buf.write(f"- {_emoji_for(c.get('severity', 'medium'))} `{c['type']}`"
+                      f" `{ref}` — {c.get('summary', '')}\n")
+        buf.write("\n")
+    if nonbreaking:
+        buf.write(f"**Non-breaking changes:** {len(nonbreaking)}\n\n")
+        for c in nonbreaking:
+            ref = c.get('path') or c.get('schema') or c.get('endpoint') or ''
+            buf.write(f"- `{c['type']}` `{ref}` — {c.get('summary', '')}\n")
+        buf.write("\n")
+
+
+def _emoji_for(sev: str) -> str:
+    return _EMOJI.get(sev, "🟡")
+
+
+# -------------------------------------------------------------------------
+# SARIF 2.1.0
+# -------------------------------------------------------------------------
+
+
+def render_sarif(
+    issues: Iterable[Issue],
+    *,
+    tool_name: str = "prcheck",
+    sarif_version: str = "2.1.0",
+    openapi_changes: list | None = None,
+    spec_name: str = "openapi.yaml",
+) -> str:
+    """Produce a SARIF log for CI emitters (GitHub code scanning compatible).
+
+    Checklist findings carry ``path:line`` locations. OpenAPI changelog
+    records are folded in too: a breaking change maps to SARIF ``error`` so
+    it surfaces as a code-scanning alert (annotated on the spec file),
+    instead of only living in the PR comment.
+    """
+    issues = list(issues)
+    results = []
+    for i in issues:
+        results.append(
+            {
+                "ruleId": i.rule_id,
+                "level": _sarif_level(i.severity),
+                "message": {"text": f"{i.summary} ({i.hint})".strip()},
+                "locations": [
+第 28 页
+
+prcheck V1.0
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": i.path},
+                            "region": {
+                                "startLine": i.line,
+                                "snippet": {"text": i.snippet or ""},
+                            },
+                        }
+                    }
+                ],
+                "properties": {"category": i.category, "severity": i.severity},
+            }
+        )
+    openapi_rules: dict[str, dict] = {}
+    for c in openapi_changes or []:
+        kind = c.get("type", "change")
+        breaking = bool(c.get("breaking"))
+        ref = c.get("path") or c.get("schema") or c.get("method") or "spec"
+        summary = (c.get("summary") or "").strip()
+        detail = (c.get("detail") or "").strip()
+        rule_id = f"openapi-{kind}" + ("-breaking" if breaking else "")
+        text = f"OpenAPI {kind} `{ref}`: {summary}"
+        if detail:
+            text += f" — {detail}"
+        results.append(
+            {
+                "ruleId": rule_id,
+                "level": "error" if breaking else _sarif_level(c.get("severity", "medium")),
+                "message": {"text": text},
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": spec_name},
+                        }
+                    }
+                ],
+                "properties": {"category": "openapi", "breaking": breaking},
+            }
+        )
+        desc = f"OpenAPI changelog: {kind} changed ({'breaking' if breaking else 'non-breaking'})"
+        openapi_rules.setdefault(
+            rule_id,
+            {
+                "id": rule_id,
+                "shortDescription": {"text": desc},
+                "fullDescription": {"text": desc},
+                "properties": {"category": "openapi", "tags": ["openapi"]},
+            },
+        )
+    rules = [
+第 29 页
+
+prcheck V1.0
+        {
+            "id": rid,
+            "shortDescription": {"text": r.summary},
+            "fullDescription": {"text": r.summary + (" " + r.hint if r.hint else "")},
+            "properties": {"category": r.category, "severity": r.severity, "tags": [r.category]},
+        }
+        for rid, r in sorted(_import_rules().items())
+    ] + sorted(openapi_rules.values(), key=lambda r: r["id"])
+    log = {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": sarif_version,
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": tool_name,
+                        "informationUri": "https://github.com/future-org/04-github-prcheck",
+                        "rules": rules,
+                    }
+                },
+                "results": results,
+            }
+        ],
+    }
+    return json.dumps(log, indent=2)
+
+
+def _sarif_level(sev: str) -> str:
+    # SARIF accepts "none" | "note" | "warning" | "error"
+    return {"high": "error", "medium": "warning", "low": "note", "info": "note"}.get(
+        sev, "note"
+    )
+
+
+def _import_rules():
+    from .rules import RULES
+
+    return RULES
+# ===== prcheck/cli.py =====
+"""prcheck CLI: analyze a PR diff + OpenAPI changelog, gate, output reports."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Optional
+第 30 页
+
+prcheck V1.0
+
+from . import __version__
+from .engine import run_analysis
+from .issues import Issue
+from .llm import Summarizer
+from .render import render_markdown, render_sarif
+
+
+def _read(path: str | Path) -> str:
+    p = Path(path)
+    if not p.exists():
+        sys.exit(f"error: {path}: no such file")
+    return p.read_text(encoding="utf-8", errors="replace")
+
+
+def _resolve(path: str | Path, base: Path) -> Path:
+    """Resolve a possibly-relative path against ``base`` (--base-dir)."""
+    p = Path(path)
+    if not p.is_absolute():
+        p = base / p
+    return p
+
+
+def _base_dir(args) -> Path:
+    """Base directory for resolving relative paths (--base-dir; default cwd)."""
+    if args.base_dir:
+        return Path(args.base_dir).expanduser().resolve()
+    return Path.cwd()
+
+
+def fetch_pr_diff(repo: str, pr: str, gh: str = "gh") -> str:
+    """Fetch a PR's diff via the ``gh`` CLI (SPEC FR1: local/Action modes).
+
+    Runs ``gh pr diff <pr> --repo <repo>`` in subprocess and returns the
+    unified diff. Raises SystemExit with a helpful message when ``gh`` is not
+    installed or the fetch fails (bad repo/PR, auth, network).
+    """
+    if not pr:
+        sys.exit("error: --repo requires --pr (PR number) — pass both to fetch a PR")
+    cmd = [gh, "pr", "diff", str(pr)]
+    if repo:
+        cmd += ["--repo", repo]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120, check=False
+        )
+    except FileNotFoundError:
+        sys.exit(
+            f"error: `{gh}` not found on PATH — install the GitHub CLI "
+            "(https://cli.github.com) or pass a diff file instead (-d/--diff-file)"
+第 31 页
+
+prcheck V1.0
+        )
+    except subprocess.TimeoutExpired:
+        sys.exit(f"error: `gh pr diff` timed out after 120s for {repo or ''}#{pr}")
+    if proc.returncode != 0:
+        hint = (proc.stderr or "").strip().splitlines()
+        detail = hint[-1] if hint else "unknown error"
+        sys.exit(f"error: failed to fetch PR {repo or ''}#{pr}: {detail}")
+    return proc.stdout
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="prcheck",
+        description="PR security checklist + OpenAPI changelog generator.",
+        epilog="Reads a git/gh PR diff and writes a checklist (Markdown / SARIF), "
+               "plus an OpenAPI breaking-change report.",
+    )
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    p.add_argument("diff", nargs="?", help="path to PR diff file (or use -d/--diff-file)")
+    p.add_argument("-d", "--diff-file", dest="diff_file", help="path to PR diff")
+    p.add_argument(
+        "--repo",
+        help="owner/repo to fetch the PR from via the gh CLI (with --pr)",
+    )
+    p.add_argument(
+        "--pr",
+        help="PR number to fetch via the gh CLI (with --repo)",
+    )
+    p.add_argument(
+        "--openapi-old",
+        help="old OpenAPI spec file (yaml/json) to diff from",
+    )
+    p.add_argument(
+        "--openapi-new",
+        help="new OpenAPI spec file (yaml/json) to diff against",
+    )
+    p.add_argument(
+        "-o",
+        "--output",
+        help="write Markdown report to this file (default: stdout)",
+    )
+    p.add_argument(
+        "--sarif",
+        help="write SARIF log to this path",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="dump structured findings as JSON to stdout (overrides -o)",
+    )
+第 32 页
+
+prcheck V1.0
+    p.add_argument(
+        "--security-only",
+        action="store_true",
+        help="only emit Security category findings",
+    )
+    p.add_argument(
+        "--data-only",
+        action="store_true",
+        help="only emit Data category findings",
+    )
+    p.add_argument(
+        "--behavior-only",
+        action="store_true",
+        help="only emit Behavior category findings",
+    )
+    p.add_argument(
+        "--min-severity",
+        choices=("info", "low", "medium", "high"),
+        default="info",
+        help="minimum severity to report",
+    )
+    p.add_argument(
+        "--require-high-ok",
+        action="store_true",
+        help="exit non-zero if any unresolved high-severity finding exists",
+    )
+    p.add_argument(
+        "--exit-code",
+        choices=("pass", "fail-at-high", "fail-at-medium"),
+        default="pass",
+        help="exit policy for CI gate",
+    )
+    p.add_argument(
+        "--llm-summary",
+        action="store_true",
+        help="include optional mock LLM summary (default off; no network)",
+    )
+    p.add_argument(
+        "--mock-llm",
+        action="store_true",
+        dest="mock_llm_flag",
+        help="alias for --llm-summary: use the deterministic mock summarizer",
+    )
+    p.add_argument(
+        "--base-dir",
+        help="base directory to resolve relative path refs (default: cwd)",
+    )
+    p.add_argument(
+        "--cache-dir",
+        default=".prcheck-cache",
+第 33 页
+
+prcheck V1.0
+        help="directory for the incremental analysis cache (default .prcheck-cache)",
+    )
+    p.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="disable the analysis cache",
+    )
+    return p
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    args = build_parser().parse_args(argv)
+    base = _base_dir(args)
+    diff_text = ""
+    if args.repo or args.pr:
+        if args.diff or args.diff_file:
+            sys.exit("error: --repo/--pr cannot be combined with a diff file")
+        diff_text = fetch_pr_diff(args.repo or "", args.pr or "")
+    elif args.diff or args.diff_file:
+        src = args.diff_file or (args.diff if args.diff else "")
+        # resolve relative refs against --base-dir (default: cwd); "-" = stdin
+        if src != "-":
+            src = str(_resolve(src, base))
+        if os.path.exists(src):
+            diff_text = _read(src)
+        elif src == "-":
+            diff_text = sys.stdin.read()
+        else:
+            # support `prcheck "git diff..."` style inline text? keep file-only.
+            sys.exit(f"error: cannot read diff source: {src}")
+    elif not sys.stdin.isatty():
+        diff_text = sys.stdin.read()
+    else:
+        sys.exit("error: no diff input (provide a diff file or pipe stdin)")
+
+    from .cache import AnalysisCache, payload_key
+
+    # NB: optional LLM summary is NOT part of the cache key (mock, costless)
+    spec_srcs = []
+    if (args.openapi_old is None) != (args.openapi_new is None):
+        # an OpenAPI diff needs both sides; silently emitting a diff-less
+        # report in CI hides a broken configuration
+        sys.exit("error: --openapi-old and --openapi-new must be used together")
+    if args.openapi_old and args.openapi_new:
+        # a requested spec that cannot be read is a hard error — silently
+        # emitting a partial report in CI hides a broken configuration
+        spec_srcs = [_resolve(args.openapi_old, base), _resolve(args.openapi_new, base)]
+    spec_texts = [_read(p) for p in spec_srcs]
+    option_tag = "|".join(
+        [
+第 34 页
+
+prcheck V1.0
+            str(args.security_only),
+            str(args.data_only),
+            str(args.behavior_only),
+            args.min_severity,
+        ]
+    )
+    key = payload_key(diff_text, spec_texts, option_tag)
+    cache_dir = str(_resolve(args.cache_dir, base))
+    cache = AnalysisCache(cache_dir, enabled=not args.no_cache)
+
+    cached = cache.get(key)
+    if cached is not None:
+        try:
+            issues = [Issue(**f) for f in cached["issues"]]
+            stat = cached["stat"]
+            openapi_changes = cached["openapi"]
+            semver: Optional[dict] = cached.get("semver")
+        except (KeyError, TypeError, ValueError):
+            # corrupt / wrong-schema entry: degrade to a recompute
+            cached = None
+        else:
+            print(f"[cache] hit {key}", file=sys.stderr)
+    if cached is None:
+        try:
+            result = run_analysis(
+                diff_text,
+                base_spec_text=spec_texts[0] if spec_texts else None,
+                new_spec_text=spec_texts[1] if spec_texts else None,
+                base_spec_name=args.openapi_old or "",
+                new_spec_name=args.openapi_new or "",
+                security_only=args.security_only,
+                data_only=args.data_only,
+                behavior_only=args.behavior_only,
+                min_severity=args.min_severity,
+            )
+        except ValueError as e:
+            # malformed/invalid OpenAPI spec (e.g. bad YAML, missing version
+            # field, structurally invalid paths) — fail loudly but cleanly
+            sys.exit(f"error: {e}")
+        issues = result.issues
+        stat = result.stat
+        openapi_changes = result.openapi_changes
+        semver = result.semver
+        cache.put(key, result.as_dict())
+
+    high_issues = [i for i in issues if i.severity == "high"]
+    gate_failed = args.require_high_ok and bool(high_issues)
+
+    if args.json:
+        payload = {
+第 35 页
+
+prcheck V1.0
+            "version": __version__,
+            "stats": stat,
+            "findings": [i.__dict__ for i in issues],
+            "openapi": openapi_changes,
+            "semver": semver,
+            "gate": {"require_high_ok": args.require_high_ok, "blocked": gate_failed},
+        }
+        json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
+        print()
+    else:
+        md = render_markdown(
+            issues,
+            stat=stat,
+            openapi_changes=openapi_changes,
+            high_blocked=gate_failed,
+        )
+        if args.llm_summary or args.mock_llm_flag:
+            md += "\n---\n" + Summarizer(enabled=True).summarize(issues, stat) + "\n"
+        if args.output:
+            _resolve(args.output, base).write_text(md, encoding="utf-8")
+            print(f"wrote markdown report -> {args.output}")
+        else:
+            print(md, end="")
+
+    if args.sarif:
+        log = render_sarif(
+            issues,
+            openapi_changes=openapi_changes,
+            spec_name=args.openapi_new or "openapi.yaml",
+        )
+        _resolve(args.sarif, base).write_text(log, encoding="utf-8")
+        print(f"wrote sarif log -> {args.sarif}")
+
+    # exit policy
+    if args.exit_code == "fail-at-high" and high_issues:
+        return 1
+    if args.exit_code == "fail-at-medium" and any(
+        i.severity in ("high", "medium") for i in issues
+    ):
+        return 1
+    if gate_failed:
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+# ===== action/gh_comment.py =====
+"""Post (or draft) the Markdown report as a GitHub PR comment.
+
+第 36 页
+
+prcheck V1.0
+Invoked from the GitHub Action with either a token in ``GH_TOKEN`` /
+``GITHUB_TOKEN`` plus ``--repo owner/repo --pr N``, or with ``--fixture-body``
+for local "gh simulation" demos (no network).
+
+The CLI never requires this module at test time; tests exercise the diff /
+OpenAPI engines directly against fixtures.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+
+def _api_base() -> str:
+    return os.environ.get("GITHUB_API_URL", "https://api.github.com")
+
+
+def _token() -> str:
+    tok = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+    if not tok:
+        raise RuntimeError(
+            "no GH_TOKEN / GITHUB_TOKEN set; either provide one or use --fixture-body"
+        )
+    return tok
+
+
+def post_via_gh_cli(repo: str, pr_number: str, body: str, *, draft: bool = False) -> str:
+    """Post a comment using the ``gh`` CLI (real-world path)."""
+    cmd = [
+        "gh", "api", "-X", "POST",
+        f"/repos/{repo}/issues/{pr_number}/comments",
+        "-f", f"body={body.decode() if isinstance(body, bytes) else body}",
+        "--jq", ".html_url",
+    ]
+    if cwd := os.environ.get("GITHUB_WORKSPACE"):
+        res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    else:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError(f"gh comment failed: {res.stderr}")
+    return res.stdout.strip()
+
+
+第 37 页
+
+prcheck V1.0
+def post_via_http(repo: str, pr_number: str, body: str) -> str:
+    """Post a comment directly through https://api.github.com."""
+    api = f"{_api_base()}/repos/{repo}/issues/{pr_number}/comments"
+    req = urllib.request.Request(
+        api,
+        data=json.dumps({"body": body}).encode("utf-8"),
+        headers={
+            "Authorization": f"token {_token()}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "prcheck-action",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req) as resp:  # noqa: S310 (explicit GitHub API)
+        payload = json.loads(resp.read().decode("utf-8"))
+        return payload.get("html_url", api)
+
+
+# Marker so inline comments posted by this tool can be recognized and skipped
+# on re-runs (idempotency), instead of piling duplicate comments onto a line.
+_INLINE_MARKER = "<!-- prcheck-inline -->"
+
+# Marker appended to the full-report PR comment. Re-runs (a `pull_request`
+# synchronize event after a new push) find the marker in the existing issue
+# comments and PATCH that comment in place instead of stacking a duplicate.
+_REPORT_MARKER = "\n\n<!-- prcheck-report -->"
+
+
+def _with_report_marker(body: str) -> str:
+    """Guarantee the report marker is present exactly once."""
+    if _REPORT_MARKER in body:
+        return body
+    return body + _REPORT_MARKER
+
+
+def update_or_post_comment(repo: str, pr_number: str, body: str) -> str:
+    """Post the full-report comment, updating a previous report in place.
+
+    Lists the PR's issue comments; if one carries the report marker, PATCH it
+    to the new body (so every push refreshes a single comment). Otherwise POST
+    a fresh comment. Returns the comment's HTML URL.
+    """
+    body = _with_report_marker(body)
+    list_url = f"{_api_base()}/repos/{repo}/issues/{pr_number}/comments"
+    try:
+        req = urllib.request.Request(
+            list_url,
+            headers={
+                "Authorization": f"token {_token()}",
+                "Accept": "application/vnd.github+json",
+第 38 页
+
+prcheck V1.0
+                "User-Agent": "prcheck-action",
+            },
+            method="GET",
+        )
+        with urllib.request.urlopen(req) as resp:  # noqa: S310
+            comments = json.loads(resp.read().decode("utf-8") or "[]")
+    except urllib.error.HTTPError:
+        # Listing failure is best-effort: fall back to posting a new comment.
+        comments = []
+    existing = next(
+        (c for c in comments if _REPORT_MARKER in c.get("body", "")), None
+    )
+    if existing:
+        url = f"{_api_base()}/repos/{repo}/issues/comments/{existing['id']}"
+        payload = _default_api_call("PATCH", url, {"body": body})
+        return payload.get("html_url", url)
+    return post_via_http(repo, pr_number, body)
+
+
+def _default_api_call(
+    method: str, url: str, data: dict | None = None
+) -> dict:
+    """Shared urllib call to the GitHub API returning parsed JSON."""
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(data).encode("utf-8") if data is not None else None,
+        headers={
+            "Authorization": f"token {_token()}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "prcheck-action",
+        },
+        method=method,
+    )
+    with urllib.request.urlopen(req) as resp:  # noqa: S310 (explicit GitHub API)
+        raw = resp.read().decode("utf-8")
+        return json.loads(raw) if raw else {}
+
+
+def fetch_pr_state(repo: str, pr_number: str) -> dict:
+    """Read the PR's live mergeability / review / draft state.
+
+    Returns a dict with at least ``mergeable``, ``mergeable_state``,
+    ``draft``, ``merged`` and ``state`` (the raw API fields snake_cased by
+    GitHub). Callers use it to surface a concrete ``NOT_MERGEABLE`` / blocked
+    reason in the report instead of guessing from the diff alone.
+    """
+    url = f"{_api_base()}/repos/{repo}/pulls/{pr_number}"
+    payload = _default_api_call("GET", url)
+    return {
+        "mergeable": payload.get("mergeable"),
+第 39 页
+
+prcheck V1.0
+        "mergeable_state": payload.get("mergeable_state"),
+        "draft": bool(payload.get("draft")),
+        "merged": bool(payload.get("merged")),
+        "state": payload.get("state"),
+    }
+
+
+# Label applied to a PR whose prcheck gate is failing. The label is prefixed so
+# operators can distinguish tool-managed labels from hand-curated ones.
+BLOCKER_LABEL = "prcheck:blocked"
+
+
+def sync_blocker_label(repo: str, pr_number: str, blocked: bool) -> str | None:
+    """Add/remove the blocker label so the PR list shows a failing gate.
+
+    Returns the label name when the label is now present, ``None`` when it was
+    removed. The GitHub issue-label API is idempotent: adding an existing label
+    returns 200 (not a duplicate); removing a missing label is a 200 no-op.
+    """
+    url = f"{_api_base()}/repos/{repo}/issues/{pr_number}/labels"
+    if blocked:
+        _default_api_call("POST", url, {"labels": [BLOCKER_LABEL]})
+        return BLOCKER_LABEL
+    try:
+        _default_api_call("DELETE", f"{url}/{BLOCKER_LABEL}")
+    except urllib.error.HTTPError as e:
+        # 404 means the label wasn't there — already in the desired state.
+        if e.code != 404:
+            raise
+    return None
+
+
+def review_comments_for_issues(issues: list) -> list[dict]:
+    """Turn engine issues into inline comment payloads.
+
+    One comment per (path, line), with every finding at that location merged
+    into the body (deduplicated). Only high/medium findings carry a snippet;
+    low/info findings are listed without it so the comment stays readable.
+    """
+    by_loc: dict[tuple[str, int], list] = {}
+    for issue in issues:
+        by_loc.setdefault((issue.path, issue.line), []).append(issue)
+
+    out: list[dict] = []
+    for (path, line), items in sorted(by_loc.items()):
+        lines = []
+        for item in sorted(items, key=lambda i: i.severity, reverse=True):
+            snippet = (item.snippet or "").strip()
+            if item.severity in ("medium", "high") and snippet:
+                lines.append(f"- **[{item.rule_id}] {item.summary}** `{snippet[:80]}`")
+第 40 页
+
+prcheck V1.0
+            else:
+                lines.append(f"- [{item.rule_id}] {item.summary}")
+        out.append(
+            {
+                "body": _INLINE_MARKER + "\n\n" + "\n".join(lines),
+                "path": path,
+                "line": line,
+            }
+        )
+    return out
+
+
+def list_review_comment_bodies(
+    repo: str, pr_number: str, commit_id: str
+) -> set[str]:
+    """Return the marker-prefixed bodies of review comments already posted.
+
+    Used to skip re-posting a finding that a previous run (same marker) already
+    anchored at a line. Returns an empty set when the list call fails so the
+    caller still posts (best-effort idempotency, never a hard failure).
+    """
+    marker = _INLINE_MARKER + "\n\n"
+    url = f"{_api_base()}/repos/{repo}/pulls/{pr_number}/comments"
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"token {_token()}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "prcheck-action",
+            },
+            method="GET",
+        )
+        with urllib.request.urlopen(req) as resp:  # noqa: S310
+            payload = json.loads(resp.read().decode("utf-8") or "[]")
+        return {
+            c["body"]
+            for c in payload
+            if c.get("body", "").startswith(marker)
+        }
+    except urllib.error.HTTPError:
+        return set()
+
+
+def post_review_comments(
+    repo: str, pr_number: str, commit_id: str, comments: list[dict]
+) -> list[str]:
+    """Post inline review comments, skipping ones already on the PR.
+
+    Each comment is posted independently so one failing API call (e.g. a
+第 41 页
+
+prcheck V1.0
+    downstream ``Not Found`` on a moved line) doesn't block the rest.
+    Returns the posted HTML URLs.
+    """
+    posted: list[str] = []
+    existing = list_review_comment_bodies(repo, pr_number, commit_id)
+    for comment in comments:
+        if comment["body"] in existing:
+            continue
+        url = f"{_api_base()}/repos/{repo}/pulls/{pr_number}/comments"
+        try:
+            payload = _default_api_call(
+                "POST", url, {
+                    "body": comment["body"],
+                    "commit_id": commit_id,
+                    "path": comment["path"],
+                    "line": comment["line"],
+                }
+            )
+        except urllib.error.HTTPError as e:
+            print(f"[prcheck] inline comment skipped for "
+                  f"{comment['path']}:{comment['line']}: HTTP {e.code} "
+                  f"{e.reason}", file=sys.stderr)
+            continue
+        posted.append(payload.get("html_url", url))
+    return posted
+
+
+def _ghmock_dir() -> Path:
+    p = Path(__file__).resolve().parent.parent / "tests" / "ghmock"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def fixture_body_path() -> Path:
+    return _ghmock_dir() / "posted_comment.md"
+
+
+def _load_fixture_body() -> str:
+    """For offline demo/testing: stream the report to a fixture PR comment."""
+    f = fixture_body_path()
+    return f.read_text() if f.exists() else ""
+
+
+def mock_post(repo: str, pr_number: str, body: str) -> str:
+    """Offline 'gh simulation': persist the comment body with metadata."""
+    path = fixture_body_path()
+    path.write_text(
+        f"<!-- gh-mock comment for {repo}#{pr_number} (no network) -->\n\n{body}",
+        encoding="utf-8",
+    )
+第 42 页
+
+prcheck V1.0
+    return f"mock://{repo}/pull/{pr_number}#comment"
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="Post prcheck report as a PR comment")
+    ap.add_argument("--repo", help="owner/repo")
+    ap.add_argument("--pr", help="pull request number")
+    ap.add_argument("--body", help="Markdown body to post")
+    ap.add_argument("--body-file", help="read body from this file")
+    ap.add_argument("--fixture-body", action="store_true",
+                    help="simplified local demo (no network)")
+    ap.add_argument("--mock", action="store_true",
+                    help="write body into tests/ghmock instead of posting")
+    ap.add_argument("--gh-cli", action="store_true",
+                    help="post via the `gh` CLI instead of the HTTP API")
+    args = ap.parse_args(argv)
+
+    if args.fixture_body:
+        body = _load_fixture_body()
+        print(f"fixture comment loaded: {len(body)} chars")
+        return 0
+
+    body = args.body
+    if args.body_file:
+        body = Path(args.body_file).read_text(encoding="utf-8")
+    if not body:
+        print("nothing to post", file=sys.stderr)
+        return 2
+    if args.mock:
+        url = mock_post(args.repo or "", args.pr or "", body)
+        print(f"[mock] PR comment written -> {url}")
+        return 0
+    if not (args.repo and args.pr):
+        print("--repo and --pr are required (or use --fixture-body/--mock)", file=sys.stderr)
+        return 2
+
+    url = (
+        post_via_gh_cli(args.repo, args.pr, body)
+        if args.gh_cli
+        else post_via_http(args.repo, args.pr, body)
+    )
+    print(f"comment posted: {url}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+# ===== action/run_action.py =====
+"""GitHub Action entrypoint for prcheck.
+
+第 43 页
+
+prcheck V1.0
+Inputs (from action.yml / env):
+
+  INPUT_DIFF            inline diff (optional; overrides auto-generate)
+  INPUT_BASE_SPEC       path to old OpenAPI spec
+  INPUT_HEAD_SPEC       path to new OpenAPI spec
+  INPUT_OUTPUT_DIR      where to write report artifacts
+  INPUT_REQUIRE_HIGH_OK "true"/"false" gate
+  INPUT_SECURITY_ONLY   "" or "true"
+  INPUT_CATEGORIES      deprecated, kept for compatibility
+  INPUT_POST_COMMENT    "true"/"false"  post a PR comment (needs GH_TOKEN)
+  PR_NUMBER / GITHUB_EVENT_PATH  used to discover the PR
+
+The entrypoint:
+
+1. derives the changed-file diff from `git diff base...head` when no inline
+   diff is supplied,
+2. runs the same engines the CLI uses,
+3. writes report.md / report.sarif into OUTPUT_DIR,
+4. optionally posts the report as a PR comment,
+5. exits non-zero when the gate blocks.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+from prcheck import __version__
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on", "y")
+
+
+def _discover_commit_id() -> str | None:
+    """The head commit SHA review comments must be anchored to."""
+    sha = os.environ.get("GITHUB_SHA")
+    if sha:
+        return sha
+    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+    if event_path and Path(event_path).exists():
+        try:
+            data = json.loads(Path(event_path).read_text(encoding="utf-8"))
+            return (data.get("pull_request") or {}).get("head", {}).get("sha")
+        except Exception:
+            return None
+    return None
+第 44 页
+
+prcheck V1.0
+
+
+def _discover_pr_number() -> str | None:
+    n = os.environ.get("PR_NUMBER")
+    if n:
+        return n
+    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+    if event_path and Path(event_path).exists():
+        try:
+            data = json.loads(Path(event_path).read_text(encoding="utf-8"))
+            return str(data.get("number") or (data.get("pull_request") or {}).get("number") or "")
+        except Exception:
+            return None
+    return None
+
+
+def _default_diff_text() -> str:
+    """Build a diff from git base...head when available."""
+    workspace = os.environ.get("GITHUB_WORKSPACE", ".")
+    base = os.environ.get("INPUT_BASE_REF", "origin/main")
+    head = os.environ.get("INPUT_HEAD_REF", "HEAD")
+    try:
+        res = subprocess.run(
+            ["git", "-C", workspace, "diff", f"{base}...{head}"],
+            capture_output=True,
+            text=True,
+        )
+        if res.returncode == 0:
+            return res.stdout
+        # fall back to `git diff base` (no merge base)
+        res = subprocess.run(
+            ["git", "-C", workspace, "diff", base],
+            capture_output=True,
+            text=True,
+        )
+        return res.stdout if res.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def main() -> int:
+    workdir = Path(os.environ.get("GITHUB_WORKSPACE", Path.cwd()))
+
+    diff_text = os.environ.get("INPUT_DIFF", "") or _default_diff_text()
+    if not diff_text.strip():
+        sys.stderr.write("prcheck-action: no diff input (INPUT_DIFF or git diff)\n")
+        # not fatal: report empty analysis so the gate is meaningful
+        diff_text = ""
+
+    # We generate analysis the same way the CLI does (shared engine).
+第 45 页
+
+prcheck V1.0
+    from prcheck.render import render_markdown, render_sarif
+    from prcheck.engine import run_analysis
+
+    base_spec_text = new_spec_text = None
+    base_spec = os.environ.get("INPUT_BASE_SPEC", "")
+    head_spec = os.environ.get("INPUT_HEAD_SPEC", "")
+    if base_spec and head_spec:
+        base_path = Path(base_spec)
+        head_path = Path(head_spec)
+        if not base_path.is_absolute():
+            base_path = workdir / base_path
+        if not head_path.is_absolute():
+            head_path = workdir / head_path
+        if base_path.exists() and head_path.exists():
+            base_spec_text = base_path.read_text(encoding="utf-8")
+            new_spec_text = head_path.read_text(encoding="utf-8")
+        else:
+            sys.stderr.write(
+                f"prcheck-action: openapi specs missing "
+                f"({base_path}, {head_path}); skipping changelog\n"
+            )
+
+    try:
+        result = run_analysis(
+            diff_text,
+            base_spec_text=base_spec_text,
+            new_spec_text=new_spec_text,
+            base_spec_name=str(base_spec),
+            new_spec_name=str(head_spec),
+            security_only=_env_flag("INPUT_SECURITY_ONLY"),
+            data_only=_env_flag("INPUT_DATA_ONLY"),
+            behavior_only=_env_flag("INPUT_BEHAVIOR_ONLY"),
+            min_severity=os.environ.get("INPUT_MIN_SEVERITY", "info"),
+        )
+    except ValueError as e:
+        # malformed/invalid OpenAPI spec — fail loudly but cleanly; a
+        # traceback in a CI step hides the real configuration problem
+        sys.stderr.write(f"prcheck-action: error: {e}\n")
+        return 2
+    issues = result.issues
+    stat = result.stat
+    openapi_changes = result.openapi_changes
+    semver = result.semver
+
+    high_issues = [i for i in issues if i.severity == "high"]
+    gate = _env_flag("INPUT_REQUIRE_HIGH_OK")
+    blocked = gate and bool(high_issues)
+
+    out_dir = Path(os.environ.get("INPUT_OUTPUT_DIR", "prcheck-reports"))
+    if not out_dir.is_absolute():
+第 46 页
+
+prcheck V1.0
+        out_dir = workdir / out_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    md = render_markdown(
+        issues,
+        stat=stat,
+        openapi_changes=openapi_changes,
+        high_blocked=blocked,
+    )
+    (out_dir / "report.md").write_text(md, encoding="utf-8")
+    (out_dir / "report.sarif").write_text(
+        render_sarif(
+            issues,
+            openapi_changes=openapi_changes,
+            spec_name=head_spec or "openapi.yaml",
+        )
+    )
+
+    semver_path = out_dir / "semver.json"
+    semver_path.write_text(
+        json.dumps(
+            {
+                "version": __version__,
+                "semver": semver,
+                "blocked": blocked,
+                "high_count": len(high_issues),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(f"prcheck-action: wrote {out_dir / 'report.md'} and report.sarif; "
+          f"high={len(high_issues)} blocked={blocked}")
+
+    # optional PR comment
+    if _env_flag("INPUT_POST_COMMENT"):
+        pr = _discover_pr_number()
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        if pr and repo:
+            from action.gh_comment import update_or_post_comment
+
+            try:
+                url = update_or_post_comment(repo, pr, md)
+                print(f"prcheck-action: comment posted -> {url}")
+            except Exception as e:  # pragma: no cover
+                sys.stderr.write(f"prcheck-action: comment failed: {e}\n")
+        else:
+            sys.stderr.write("prcheck-action: POST_COMMENT=true but no PR is "
+                             "detected (GITHUB_EVENT_PATH / PR_NUMBER)\n")
+
+第 47 页
+
+prcheck V1.0
+    # optional inline review comments anchored to added diff lines
+    if _env_flag("INPUT_POST_INLINE_COMMENT") and issues:
+        pr = _discover_pr_number()
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        commit_id = _discover_commit_id()
+        if pr and repo and commit_id:
+            from action.gh_comment import post_review_comments, review_comments_for_issues
+
+            comments = review_comments_for_issues(issues)
+            try:
+                urls = post_review_comments(repo, pr, commit_id, comments)
+                print(f"prcheck-action: posted {len(urls)} inline comments")
+            except Exception as e:  # pragma: no cover
+                sys.stderr.write(f"prcheck-action: inline comments failed: {e}\n")
+        else:
+            sys.stderr.write("prcheck-action: POST_INLINE_COMMENT=true but "
+                             "PR/commit not detected (GITHUB_EVENT_PATH, "
+                             "GITHUB_SHA or PR_NUMBER)\n")
+
+    # optional PR mergeability readback (surface GitHub's live gate picture)
+    pr_state: dict | None = None
+    if _env_flag("INPUT_CHECK_MERGEABLE"):
+        pr = _discover_pr_number()
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        if pr and repo:
+            from action.gh_comment import fetch_pr_state
+
+            try:
+                pr_state = fetch_pr_state(repo, pr)
+                print(f"prcheck-action: PR {pr} mergeable={pr_state['mergeable']} "
+                      f"state={pr_state['mergeable_state']}")
+            except Exception as e:  # pragma: no cover
+                sys.stderr.write(f"prcheck-action: mergeable check failed: {e}\n")
+        else:
+            sys.stderr.write("prcheck-action: CHECK_MERGEABLE=true but no PR "
+                             "detected (GITHUB_EVENT_PATH / PR_NUMBER)\n")
+
+    # optional blocker-label sync (add when the gate fails, remove when it passes)
+    if _env_flag("INPUT_SYNC_LABELS"):
+        pr = _discover_pr_number()
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        if pr and repo:
+            from action.gh_comment import sync_blocker_label
+
+            try:
+                label = sync_blocker_label(repo, pr, blocked)
+                verb = "added" if label else "removed (no blocker)"
+                print(f"prcheck-action: {verb} {label or 'prcheck:blocked'}")
+            except Exception as e:  # pragma: no cover
+                sys.stderr.write(f"prcheck-action: label sync failed: {e}\n")
+第 48 页
+
+prcheck V1.0
+        else:
+            sys.stderr.write("prcheck-action: SYNC_LABELS=true but no PR "
+                             "detected (GITHUB_EVENT_PATH / PR_NUMBER)\n")
+
+    return 1 if blocked else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+# ===== action/webhook.py =====
+"""P3 (bonus): minimal webhook bridge for a hosted prcheck App.
+
+Runs the *same* shared analysis engine as the CLI and Action, and can post
+the checklist as a PR comment. stdlib-only; mount with any WSGI server
+(gunicorn/uwsgi) or invoke ``handle_event`` directly in a function/App.
+
+Two payload shapes are accepted:
+
+1. The prcheck bridge shape (see module docstring example / README):
+
+   ``{"diff": ..., "diff_url": ..., "repo": ..., "pr": ...,
+      "base_spec": ..., "head_spec": ...}``
+
+2. A raw GitHub ``pull_request`` webhook event (what GitHub sends a hosted
+   App): ``number``, ``pull_request.diff_url``/``html_url``, and
+   ``repository.full_name`` are extracted automatically.
+
+When ``WEBHOOK_SECRET`` is set, incoming requests are HMAC-verified against
+the ``X-Hub-Signature-256`` header (GitHub's
+``webhook_secret``/``WEBHOOK_SECRET`` contract), so forged events are
+rejected with a clean 401 instead of being analyzed.
+
+Gate / comment policy is controlled by the same environment variables the
+action uses (``INPUT_REQUIRE_HIGH_OK``, ``INPUT_POST_COMMENT``,
+``GH_TOKEN``). Response is the AnalysisResult as JSON + gate state.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import os
+import urllib.error
+import urllib.request
+from typing import Any
+
+
+def _flag(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on", "y")
+第 49 页
+
+prcheck V1.0
+
+
+def verify_signature(secret: str, body: bytes, signature_header: str) -> bool:
+    """Constant-time check of a GitHub ``X-Hub-Signature-256`` header.
+
+    ``signature_header`` is the raw header value, e.g.
+    ``sha256=9a7f...``. Returns False when the header is missing, malformed,
+    or does not match the HMAC-SHA256 of ``body`` under ``secret``.
+    """
+    if not signature_header:
+        return False
+    try:
+        scheme, _, expected = signature_header.partition("=")
+        if scheme != "sha256" or not expected:
+            return False
+        actual = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(actual, expected)
+    except (TypeError, ValueError):
+        return False
+
+
+def parse_pull_request_event(event: dict) -> dict:
+    """Flatten a raw GitHub ``pull_request`` event into the bridge shape.
+
+    Extracts the diff URL, repo and PR number GitHub puts in a real
+    ``pull_request`` webhook payload. Non-PR events come back empty so the
+    caller can reject them cleanly.
+    """
+    if event.get("action") is None and "pull_request" not in event:
+        # not a GitHub pull_request event; if it already is the flat bridge
+        # shape (repo/pr/diff_url at top level) pass it through unchanged.
+        if event.get("pr"):
+            return {k: event[k] for k in ("repo", "pr", "diff_url") if k in event}
+        return {"repo": "", "pr": ""}
+    number = event.get("number") or (event.get("pull_request") or {}).get("number")
+    pr = event.get("pull_request") or {}
+    repo = event.get("repository") or {}
+    return {
+        "diff_url": pr.get("diff_url") or pr.get("url") or "",
+        "repo": repo.get("full_name") or "",
+        "pr": str(number) if number is not None else event.get("pr", "") or "",
+    }
+
+
+def fetch_diff_from_url(diff_url: str) -> str:
+    """Fetch a PR diff from a GitHub URL (e.g. ``.../pulls/7``).
+
+    Requests the unified diff via the ``Accept: application/vnd.github.v3.diff``
+    media type so the response body is diff text directly. Uses
+    ``GH_TOKEN``/``GITHUB_TOKEN`` when present (private repos), otherwise makes
+第 50 页
+
+prcheck V1.0
+    an unauthenticated request (public repos). Failures raise ``ValueError``
+    with a clean message, matching the CLI's malformed-spec error handling.
+    """
+    headers = {
+        "Accept": "application/vnd.github.v3.diff",
+        "User-Agent": "prcheck-webhook",
+    }
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"token {token}"
+    req = urllib.request.Request(diff_url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 (explicit GitHub API)
+            return resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        detail = (e.read() or b"").decode("utf-8", "replace") if e.read is not None else ""
+        raise ValueError(
+            f"failed to fetch diff from {diff_url}: HTTP {e.code} {e.reason}"
+            + (f" — {detail[:300]}" if detail else "")
+        ) from e
+    except urllib.error.URLError as e:
+        raise ValueError(f"failed to fetch diff from {diff_url}: {e.reason}") from e
+
+
+def _resolve_diff(payload: dict) -> str:
+    """Diff source precedence: inline ``diff`` wins, else fetch ``diff_url``."""
+    diff = payload.get("diff") or ""
+    if diff:
+        return diff
+    if payload.get("diff_url"):
+        return fetch_diff_from_url(str(payload["diff_url"]))
+    return ""
+
+
+def handle_event(payload: dict) -> dict:
+    """Analyze a webhook payload and return ``{"result": ..., "gate": ...}``."""
+    from prcheck.engine import run_analysis
+
+    diff = _resolve_diff(payload)
+
+    base_spec = payload.get("base_spec") or payload.get("openapi_old")
+    head_spec = payload.get("head_spec") or payload.get("openapi_new")
+    base_text = _read_spec(base_spec)
+    head_text = _read_spec(head_spec)
+
+    result = run_analysis(
+        diff,
+        base_spec_text=base_text,
+        new_spec_text=head_text,
+        base_spec_name=str(base_spec or "old"),
+第 51 页
+
+prcheck V1.0
+        new_spec_name=str(head_spec or "new"),
+        security_only=_flag("INPUT_SECURITY_ONLY"),
+        data_only=_flag("INPUT_DATA_ONLY"),
+        behavior_only=_flag("INPUT_BEHAVIOR_ONLY"),
+        min_severity=os.environ.get("INPUT_MIN_SEVERITY", "info"),
+    )
+
+    high = [i for i in result.issues if i.severity == "high"]
+    gate = _flag("INPUT_REQUIRE_HIGH_OK")
+    blocked = gate and bool(high)
+
+    comment_url = None
+    repo, pr_number = payload.get("repo", ""), payload.get("pr", "")
+    if _flag("INPUT_POST_COMMENT") and repo and pr_number and diff:
+        # ``urllib``-only GitHub client; no requests dependency.
+        from action.gh_comment import update_or_post_comment
+        from prcheck.render import render_markdown
+
+        md = render_markdown(result.issues, stat=result.stat,
+                             openapi_changes=result.openapi_changes,
+                             high_blocked=blocked)
+        comment_url = update_or_post_comment(str(repo), str(pr_number), md)
+
+    return {
+        "result": result.as_dict(),
+        "gate": {"require_high_ok": gate, "blocked": blocked,
+                 "high_count": len(high), "comment_url": comment_url},
+    }
+
+
+def _read_spec(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, dict):  # already-parsed spec object
+        return json.dumps(value)
+    if isinstance(value, str) and os.path.exists(value):
+        return open(value, encoding="utf-8").read()
+    return value  # inline spec text
+
+
+def wsgi_app(environ, start_response):
+    """WSGI entry point (``gunicorn action.webhook:wsgi_app``).
+
+    Also accepts raw GitHub ``pull_request`` webhook events and, when
+    ``WEBHOOK_SECRET`` is set, verifies ``X-Hub-Signature-256`` before
+    analysis so unauthenticated callers can't trigger payload fetches or
+    comment posts.
+    """
+    length = int(environ.get("CONTENT_LENGTH") or 0)
+    body = environ["wsgi.input"].read(length) if length else b"{}"
+第 52 页
+
+prcheck V1.0
+    secret = os.environ.get("WEBHOOK_SECRET", "").strip()
+    if secret:
+        sig = (environ.get("HTTP_X_HUB_SIGNATURE_256") or "").strip()
+        if not verify_signature(secret, body, sig):
+            start_response(
+                "401 Unauthorized",
+                [("Content-Type", "application/json; charset=utf-8")],
+            )
+            return [json.dumps({"error": "invalid X-Hub-Signature-256"}).encode("utf-8")]
+    try:
+        payload = json.loads(body.decode("utf-8") or "{}")
+        if payload.get("pull_request") or payload.get("action") is not None:
+            # raw GitHub pull_request event → flatten to the bridge shape
+            merged = dict(payload)
+            merged.update(parse_pull_request_event(payload))
+            payload = merged
+        out = handle_event(payload)
+        status, content = "200 OK", json.dumps(out, ensure_ascii=False)
+    except Exception as exc:  # noqa: BLE001 - respond JSON on any failure
+        status, content = "400 Bad Request", json.dumps({"error": str(exc)})
+    start_response(status, [("Content-Type", "application/json; charset=utf-8")])
+    return [content.encode("utf-8")]
+
+
+if __name__ == "__main__":
+    # Convenience: `python -m action.webhook payload.json` (no server needed)
+    import sys
+
+    if len(sys.argv) < 2:
+        sys.exit("usage: python -m action.webhook <payload.json>")
+    try:
+        with open(sys.argv[1], encoding="utf-8") as f:
+            out = handle_event(json.load(f))
+    except (OSError, ValueError) as e:
+        # mirror the WSGI path: report bad input cleanly, never a traceback
+        sys.exit(f"error: {e}")
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+第 53 页
