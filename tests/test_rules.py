@@ -127,6 +127,36 @@ def test_create_table_ddl_and_raise_http_error_status_flagged():
     assert st == [1, 2, 3, 4], f"B003 line mismatch: {st}"
 
 
+def test_path_traversal_and_xss_sinks_flagged():
+    """R013 flags file-serving/open sinks fed by user-ish input; R014 flags XSS sinks."""
+    src = (
+        "return send_file(request.args['f'])\n"
+        "return send_from_directory(UPLOAD_DIR, filename)\n"
+        "fh = open(user_file)\n"
+        "data = Path('/etc/' + name).read_text()\n"
+        "el.innerHTML = userHtml;\n"
+        "return mark_safe(html)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    path_lines = [i.line for i in issues if i.rule_id == "R013-path"]
+    assert path_lines == [1, 2, 3, 4], f"R013-path mismatch: {path_lines}"
+    xss_lines = [i.line for i in issues if i.rule_id == "R014-xss"]
+    assert xss_lines == [5, 6], f"R014-xss mismatch: {xss_lines}"
+
+
+def test_path_traversal_and_xss_sink_negatives_quiet():
+    """Literal paths, config constants and safe DOM APIs must not fire."""
+    src = (
+        "with open('/etc/hosts') as fh:\n"
+        "with open('config.json', 'r') as fh:\n"
+        "fh = open(LOGFILE, 'a')\n"
+        "el.textContent = userHtml;\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R013-path"], issues
+    assert not [i for i in issues if i.rule_id == "R014-xss"], issues
+
+
 def test_swallowed_exception_with_named_type_flagged():
     """B001 flags `except <Type> as e: return None`, not just bare Exception."""
     src = (
@@ -235,6 +265,22 @@ _UNCOVERED_RULE_CASES = [
         "subprocess.check_call(cmd, shell=shell_enabled)\n"
         "subprocess.run([\"sh\", \"-c\", user_cmd])\n",
     ),
+    (
+        "R013-path",
+        "security",
+        "high",
+        "return send_file(request.args['f'])\n"
+        "fh = open(user_file)\n"
+        "data = Path('/etc/' + name).read_text()\n",
+    ),
+    (
+        "R014-xss",
+        "security",
+        "medium",
+        "el.innerHTML = userHtml;\n"
+        "document.write(markup)\n"
+        "return mark_safe(html)\n",
+    ),
 ]
 
 
@@ -265,7 +311,7 @@ def test_every_rule_has_test_exposure():
         "D001", "D002-db", "D003", "D004",
         "R001-a", "R001-b", "R002", "R003", "R004", "R005",
         "R006-deps", "R007-cors", "R008", "R009", "R010", "R011-session",
-        "R012-cmd",
+        "R012-cmd", "R013-path", "R014-xss",
     }
     assert exposed <= rids
     uncovered = rids - exposed

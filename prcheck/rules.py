@@ -143,6 +143,37 @@ _RULE_TUPLES = [
         r"[\"' \t-]*\s*,\s*[\"']-c[\"']",
         "Prefer argument lists over shell strings; validate/quote any variable input",
     ),
+    (
+        "R013-path",
+        "security",
+        "high",
+        "File path built from request/user input",
+        # File-serving sinks whose argument is not a quoted literal (a variable,
+        # request arg, or expression — reviewer must verify it is allowlisted),
+        # plus open()/Path() calls built by f-string / concatenation or taking a
+        # bare identifier. Literal single-quoted paths stay quiet.
+        r"(?i)\b(?:send_file|send_from_directory|FileResponse|StaticFiles)"
+        r"\s*\(\s*(?!['\"])[^)\n]+\)|"
+        r"\b(?:open|os\.open|Path)\s*\(\s*(?:f['\"]|['\"][^)\n]*\+)[^)\n]*\)|"
+        # bare-identifier arg that smells user-controlled (uid / user_file /
+        # request path / upload name …); require at least one lowercase letter so
+        # SCREAMING_CASE config constants (LOGFILE, DATA_DIR) stay quiet — the
+        # global (?i) flag folds case, so that check must re-enable sensitivity
+        # with the scoped (?-i:…) flag.
+        r"\b(?:open|os\.open|Path)\s*\(\s*(?!['\"])(?-i:(?=[A-Za-z_]\w*[a-z]))[A-Za-z_]\w*"
+        r"(?:user|username|name|path|file|arg|req|request|query|param|"
+        r"upload|input|dir|id|fn|fname|filename|body|content)[\w.\[\]]*\s*(?:,|\))",
+        "Validate/normalize user-controlled paths; never serve files outside an allowlisted directory",
+    ),
+    (
+        "R014-xss",
+        "security",
+        "medium",
+        "XSS sink: unescaped user/HTML string rendered",
+        r"(?i)\b(?:innerHTML|outerHTML|document\.write|insertAdjacentHTML|"
+        r"lxml\.html\.fromstring|Jinja2\s*\.\s*Template|mark_safe)\s*[=(]",
+        "Escape or sanitize content rendered into HTML; prefer frameworks that autoescape",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
