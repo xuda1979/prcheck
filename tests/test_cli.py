@@ -66,6 +66,26 @@ def test_cli_exit_pass_without_gate():
     assert r.returncode == 0
 
 
+def test_cli_exit_code_fail_at_medium():
+    """--exit-code fail-at-medium blocks on medium findings with no highs."""
+    medium = [
+        "-d", str(DIFF), "--data-only", "--min-severity", "medium",
+        "--no-cache", "--json",
+    ]
+    r = _run([*medium, "--exit-code", "fail-at-medium"])
+    assert r.returncode == 1, r.stderr
+    data = json.loads(r.stdout)
+    assert data["findings"], "expected medium findings from the fixture"
+    assert all(f["severity"] == "medium" for f in data["findings"])
+    assert data["gate"]["blocked"] is False  # require-high-ok held
+
+    r2 = _run([*medium, "--exit-code", "fail-at-high"])
+    assert r2.returncode == 0, r2.stderr
+
+    r3 = _run([*medium, "--exit-code", "pass"])
+    assert r3.returncode == 0, r3.stderr
+
+
 def test_cli_openapi_changelog(tmp_path):
     out = tmp_path / "oa.md"
     r = _run(["-d", str(DIFF), "--openapi-old", str(V1), "--openapi-new", str(V2), "-o", str(out)])

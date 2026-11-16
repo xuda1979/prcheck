@@ -358,3 +358,130 @@ def test_update_or_post_comment_falls_back_when_list_fails(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "tok")
     url = gh_comment.update_or_post_comment("owner/repo", "7", "# fresh")
     assert url == "https://x/new"
+
+
+# --- Action main() end-to-end comment paths (PR/commit discovery) --------
+
+class _FakeGH:
+    """Records API calls; serves canned responses for action main() tests."""
+
+    def __init__(self, issue_comments=None):
+        self.issue_comments = issue_comments if issue_comments is not None else []
+        self.calls = []  # (method, full_url, json_payload or None)
+        self._n = 0
+
+    def __call__(self, req, timeout=None):
+        payload = json.loads(req.data.decode("utf-8")) if req.data else None
+        self.calls.append((req.method, req.full_url, payload))
+        if req.method == "GET" and req.full_url.endswith("/issues/7/comments"):
+            return FakeResp(json.dumps(self.issue_comments).encode())
+        if req.method == "GET" and req.full_url.endswith("/pulls/9/comments"):
+            return FakeResp(b"[]")
+        self._n += 1
+        return FakeResp(
+            json.dumps({"html_url": f"https://example.com/ok#{self._n}"}).encode()
+        )
+
+
+def test_main_posts_report_comment_via_pr_number(tmp_path, monkeypatch, capsys):
+    """INPUT_POST_COMMENT=true drives the GET->POST upsert in main() (AC7)."""
+    import urllib.request
+
+    from action import gh_comment, run_action
+
+    out_dir = tmp_path / "out"
+    fake = _FakeGH()  # no prior report comment -> POST
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    monkeypatch.setenv("INPUT_DIFF", DIFF.read_text())
+    monkeypatch.setenv("INPUT_OUTPUT_DIR", str(out_dir))
+    monkeypatch.setenv("INPUT_REQUIRE_HIGH_OK", "false")
+    monkeypatch.setenv("INPUT_POST_COMMENT", "true")
+    monkeypatch.setenv("INPUT_POST_INLINE_COMMENT", "false")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("PR_NUMBER", "7")
+
+    rc = run_action.main()
+    assert rc == 0, capsys.readouterr().err
+
+    assert (out_dir / "report.md").exists()
+    assert (out_dir / "report.sarif").exists()
+    assert json.loads((out_dir / "semver.json").read_text())["blocked"] is False
+
+    methods = [c[0] for c in fake.calls]
+    assert methods == ["GET", "POST"], fake.calls
+    get_url = fake.calls[0][1]
+    assert get_url.endswith("/repos/owner/repo/issues/7/comments")
+    posted_payload = fake.calls[-1][2]
+    assert posted_payload["body"].count(gh_comment._REPORT_MARKER) == 1
+    assert "Security checklist" in posted_payload["body"]
+    assert "comment posted" in capsys.readouterr().out
+
+
+def test_main_patches_existing_report_comment(tmp_path, monkeypatch, capsys):
+    """main() finds a prior marker comment and PATCHes it in place."""
+    import urllib.request
+
+    from action import gh_comment, run_action
+
+    marker = gh_comment._REPORT_MARKER
+    fake = _FakeGH(issue_comments=[{"id": 91, "body": "old report" + marker}])
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    monkeypatch.setenv("INPUT_DIFF", DIFF.read_text())
+    monkeypatch.setenv("INPUT_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("INPUT_REQUIRE_HIGH_OK", "false")
+    monkeypatch.setenv("INPUT_POST_COMMENT", "true")
+    monkeypatch.setenv("INPUT_POST_INLINE_COMMENT", "false")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("PR_NUMBER", "7")
+
+    rc = run_action.main()
+    assert rc == 0
+    methods = [c[0] for c in fake.calls]
+    assert methods == ["GET", "PATCH"], fake.calls
+    patch_url = fake.calls[-1][1]
+    assert patch_url.endswith("/repos/owner/repo/issues/comments/91")
+    assert fake.calls[-1][2]["body"].count(marker) == 1
+
+
+def test_main_posts_inline_comments_from_event_path(tmp_path, monkeypatch, capsys):
+    """POST_INLINE_COMMENT=true uses GITHUB_EVENT_PATH for PR + commit SHA."""
+    import urllib.request
+
+    from action import gh_comment, run_action
+
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({
+        "action": "synchronize",
+        "number": 9,
+        "pull_request": {"number": 9, "head": {"sha": "abc123def"}},
+        "repository": {"full_name": "owner/repo"},
+    }))
+    fake = _FakeGH()
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    monkeypatch.setenv("INPUT_DIFF", DIFF.read_text())
+    monkeypatch.setenv("INPUT_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("INPUT_REQUIRE_HIGH_OK", "false")
+    monkeypatch.setenv("INPUT_POST_COMMENT", "false")
+    monkeypatch.setenv("INPUT_POST_INLINE_COMMENT", "true")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.delenv("PR_NUMBER", raising=False)
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+
+    rc = run_action.main()
+    assert rc == 0, capsys.readouterr().err
+
+    posts = [c for c in fake.calls if c[0] == "POST"]
+    assert posts, "expected inline comment POSTs"
+    for _, url, payload in posts:
+        assert "/pulls/9/comments" in url
+        assert payload["commit_id"] == "abc123def", payload
+        assert payload["body"].startswith(gh_comment._INLINE_MARKER)
+        assert payload["path"] and payload["line"] >= 1
+    methods = [c[0] for c in fake.calls]
+    assert methods[0] == "GET", "existing review comments listed before POSTs"
+    out = capsys.readouterr().out
+    assert f"posted {len(posts)} inline comments" in out
