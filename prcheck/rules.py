@@ -309,6 +309,30 @@ _RULE_TUPLES = [
         r"(?:\s*\+\s*[^)\n]*?)?\s*(?:,|\))",
         "Never fetch a URL taken from request input; validate host/protocol against an allowlist",
     ),
+    (
+        "R022-ssti",
+        "security",
+        "high",
+        "Template rendered from request input or a template-named variable (SSTI)",
+        # (A1) render_template_string(...) fed request input — a quoted literal
+        #      fails the (?!['\"]) guard, so inline templates stay quiet.
+        r"(?i)\brender_template_string\s*\(\s*(?!['\"])([^\n)]*?request\.(?:args|values|form|headers|json))|"
+        # (A2) render_template_string(var) with a template-ish variable name
+        #      (tmpl / template / tpl / markup). The word must be the terminal id
+        #      component, matched case-sensitively (scoped (?-i:...)) so
+        #      SCREAMING_CASE constants (STATIC_TPL) stay quiet; the lowercase
+        #      lookahead rejects all-caps ids outright.
+        r"\brender_template_string\s*\(\s*(?!['\"])(?=[\w.]*[a-z])(?:[\w.]*?)?"
+        r"(?-i:(?:tmpl|template|tpl|markup))[\w.\[\]]*(?:\s*,|\s*\))|"
+        # (B1) bare jinja2/django.template Template(...) fed request input
+        #      (after `from jinja2 import Template` / django.template.Template);
+        #      (?<!string\.) keeps stdlib string.Template quiet.
+        r"(?<!string\.)\bTemplate\s*\(\s*(?!['\"])([^\n)]*?request\.(?:args|values|form|headers|json))|"
+        # (B2) bare Template(var) with a template-ish variable
+        r"(?<!string\.)\bTemplate\s*\(\s*(?!['\"])(?=[\w.]*[a-z])(?:[\w.]*?)?"
+        r"(?-i:(?:tmpl|template|tpl|markup))[\w.\[\]]*(?:\s*,|\s*\))",
+        "Never render a template obtained from request input; compile approved templates only",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

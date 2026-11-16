@@ -361,6 +361,40 @@ def test_ssrf_static_and_constant_urls_quiet():
     assert not [i for i in issues if i.rule_id == "R021-ssrf"], issues
 
 
+def test_ssti_templates_from_request_or_variable_flagged():
+    """R022-ssti flags render_template_string/Template fed request input or
+    template-named variables."""
+    src = (
+        "return render_template_string(request.args['tpl'], name=name)\n"
+        "out = render_template_string(user_template)\n"
+        "rendered = Template(request.form['tmpl']).render()\n"
+        "html = jinja2.Template(request.json['tpl']).render()\n"
+        "body = render_template_string(tmpl_var, **ctx)\n"
+        "response = Template(stored_markup).render(data)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R022-ssti"]
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6], f"R022-ssti mismatch: {hits}"
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_ssti_literals_and_string_template_quiet():
+    """R022-ssti must not fire on inline/static templates, string.Template,
+    render_template or assignment-only lines."""
+    src = (
+        "return render_template_string('<h1>Hello {{ name }}</h1>', name=name)\n"
+        "return render_template_string(STATIC_TPL, user=user)\n"  # SCREAMING_CASE constant
+        "s = string.Template('$who')\n"
+        "s = string.Template(user_var)\n"
+        "return render_template('index.html', user=user)\n"
+        "t = Template('Hello {{ who }}')\n"
+        "msg = render_template_string(f'Hello {name}')\n"
+        "cfg.admin_template = 'x'\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R022-ssti"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -521,6 +555,7 @@ def test_every_rule_has_test_exposure():
         "R006-deps", "R007-cors", "R008", "R009", "R010", "R011-session",
         "R012-cmd", "R013-path", "R014-xss", "R015-crypto", "R016-random",
         "R017-redirect", "R018-debug", "R019-csrf", "R020-pem", "R021-ssrf",
+        "R022-ssti",
     }
     assert exposed <= rids
     uncovered = rids - exposed
