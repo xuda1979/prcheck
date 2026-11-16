@@ -153,13 +153,13 @@ def handle_event(payload: dict) -> dict:
     repo, pr_number = payload.get("repo", ""), payload.get("pr", "")
     if _flag("INPUT_POST_COMMENT") and repo and pr_number and diff:
         # ``urllib``-only GitHub client; no requests dependency.
-        from action.gh_comment import post_via_http
+        from action.gh_comment import update_or_post_comment
         from prcheck.render import render_markdown
 
         md = render_markdown(result.issues, stat=result.stat,
                              openapi_changes=result.openapi_changes,
                              high_blocked=blocked)
-        comment_url = post_via_http(str(repo), str(pr_number), md)
+        comment_url = update_or_post_comment(str(repo), str(pr_number), md)
 
     return {
         "result": result.as_dict(),
