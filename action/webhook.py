@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
+import urllib.request
 from typing import Any
 
 
@@ -33,15 +35,51 @@ def _flag(name: str, default: bool = False) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on", "y")
 
 
+def fetch_diff_from_url(diff_url: str) -> str:
+    """Fetch a PR diff from a GitHub URL (e.g. ``.../pulls/7``).
+
+    Requests the unified diff via the ``Accept: application/vnd.github.v3.diff``
+    media type so the response body is diff text directly. Uses
+    ``GH_TOKEN``/``GITHUB_TOKEN`` when present (private repos), otherwise makes
+    an unauthenticated request (public repos). Failures raise ``ValueError``
+    with a clean message, matching the CLI's malformed-spec error handling.
+    """
+    headers = {
+        "Accept": "application/vnd.github.v3.diff",
+        "User-Agent": "prcheck-webhook",
+    }
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"token {token}"
+    req = urllib.request.Request(diff_url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310 (explicit GitHub API)
+            return resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        detail = (e.read() or b"").decode("utf-8", "replace") if e.read is not None else ""
+        raise ValueError(
+            f"failed to fetch diff from {diff_url}: HTTP {e.code} {e.reason}"
+            + (f" — {detail[:300]}" if detail else "")
+        ) from e
+    except urllib.error.URLError as e:
+        raise ValueError(f"failed to fetch diff from {diff_url}: {e.reason}") from e
+
+
+def _resolve_diff(payload: dict) -> str:
+    """Diff source precedence: inline ``diff`` wins, else fetch ``diff_url``."""
+    diff = payload.get("diff") or ""
+    if diff:
+        return diff
+    if payload.get("diff_url"):
+        return fetch_diff_from_url(str(payload["diff_url"]))
+    return ""
+
+
 def handle_event(payload: dict) -> dict:
     """Analyze a webhook payload and return ``{"result": ..., "gate": ...}``."""
     from prcheck.engine import run_analysis
 
-    diff = payload.get("diff") or ""
-    if not diff and payload.get("diff_url"):
-        # In production this would fetch diff_url with a token; this bridge
-        # is a local simulation, so a missing diff is reported as such.
-        diff = ""
+    diff = _resolve_diff(payload)
 
     base_spec = payload.get("base_spec") or payload.get("openapi_old")
     head_spec = payload.get("head_spec") or payload.get("openapi_new")

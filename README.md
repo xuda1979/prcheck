@@ -130,6 +130,12 @@ Payload: `{"diff": "...", "repo": "owner/repo", "pr": "7",
 "base_spec": "<inline or path>", "head_spec": "<inline or path>"}`. Gate /
 comment behavior honors the same `INPUT_*` env vars as the action.
 
+The bridge can also fetch a PR's diff itself: pass `"diff_url"` (a GitHub PR
+URL such as `https://api.github.com/repos/owner/repo/pulls/7`) instead of an
+inline `diff`. The diff is fetched with the GitHub API's unified-diff media
+type, using `GH_TOKEN`/`GITHUB_TOKEN` when present (private repos). An inline
+`diff` always takes precedence.
+
 ## Rules
 
 The rule library lives in `prcheck/rules.py` and is a plain list of
