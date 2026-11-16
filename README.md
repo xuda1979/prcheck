@@ -191,7 +191,9 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   built from request fragments), LDAP injection (python-ldap `search_s`/
   `search_st`/`search_ext` family or ldap3/conn-named `.search` receivers fed
   request-derived filters), XPath injection (lxml `.xpath()` calls or
-  `etree.XPath`/`XPathEvaluator` compilations fed request-derived queries).
+  `etree.XPath`/`XPathEvaluator` compilations fed request-derived queries),
+  client-side SSRF (JS `fetch`/`axios`/`got`/Node `http(s)`/`request` and
+  `XMLHttpRequest().open(method, url)` sinks fed request-derived URLs).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

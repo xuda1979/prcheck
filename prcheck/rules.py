@@ -627,6 +627,49 @@ _RULE_TUPLES = [
         r")",
         "XPath expressions built from request input allow predicate injection; whitelist/validate the query or bind values via the safe API (e.g. variables dict) instead of concatenating input",
     ),
+    (
+        "R031-ssrf-js",
+        "security",
+        "high",
+        "Client-side SSRF: JS fetch/axios/got/Node/XMLHttpRequest fed a request-derived URL",
+        # Fires when a JS HTTP-for-fetch sink is fed request-derived input or a
+        # url-named variable (CWE-918):
+        #   (A) fetch / axios(.<verb>) / got / Node http(s).get|request /
+        #       request-lib calls whose FIRST argument is a request-derived
+        #       accessor (req/request/ctx/event -> .field / ['field']) or a
+        #       url-named variable (name contains url/uri/link/endpoint/target/
+        #       callback/webhook, but is not a SCREAMING_CASE constant).
+        #   (B) XMLHttpRequest-family .open(method, url) whose 2nd (url) arg is
+        #       request-derived / url-named; receiver must be an xhr-named
+        #       variable or an XMLHttpRequest(...) construction.
+        # Literal quoted URLs, SCREAMING_CASE constants and non-JS receivers
+        # (db.fetch, router.get, api.get, window.open, socket.connect) stay
+        # quiet.
+        r"(?i)(?:"
+        # (A) JS fetch / axios / got / Node http(s) / request-lib sinks whose FIRST
+        #     argument is request-derived (req/request/ctx/event accessor) or a
+        #     url-named variable.  Literal quoted URLs, SCREAMING_CASE constants and
+        #     non-JS fetchers (db.fetch, router.get, api.get) stay quiet.
+        r"(?:\bfetch\s*\(|\b(?:axios|got)(?:\.\w+)?\s*\(|"
+        r"\b(?:http|https)\.(?:get|request)\s*\(|\brequest\s*\()"
+        r"\s*(?!['\"])(?=[^,)\n]*(?:"
+        r"\b(?:req|request|ctx|event)\b\s*(?:\.|\[)|"
+        r"(?-i:(?=[A-Za-z_]\w*[a-z]))[A-Za-z_]\w*(?:url|uri|link|endpoint|"
+        r"target|callback|webhook)[A-Za-z0-9_]*"
+        r"))"
+        r"|"
+        # (B) XMLHttpRequest-family .open(method, url) whose URL (2nd) argument is
+        #     request-derived / url-named.  Literal URLs and non-xhr .open receivers
+        #     (socket, file, connection) stay quiet.
+        r"\b(?:xhr\w*|XMLHttpRequest\s*\([^)\n]*\))\s*\.\s*open\s*\([^\n]*?,\s*"
+        r"(?!['\"])(?=[^,)\n]*(?:"
+        r"\b(?:req|request|ctx|event)\b\s*(?:\.|\[)|"
+        r"(?-i:(?=[A-Za-z_]\w*[a-z]))[A-Za-z_]\w*(?:url|uri|link|endpoint|"
+        r"target|callback|webhook)[A-Za-z0-9_]*"
+        r"))"
+        r")",
+        "A URL built from request input reaches an external-fetch CLI (fetch/axios/got/Node http or XMLHttpRequest); validate/whitelist the URL before use (SSRF/CWE-918)",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

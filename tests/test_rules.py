@@ -780,6 +780,49 @@ def test_xpath_literals_and_unrelated_quiet():
     assert not [i for i in issues if i.rule_id == "R030-xpath"], issues
 
 
+def test_ssrf_js_fetch_sinks_flagged():
+    """R031-ssrf-js flags JS client-side fetch sinks fed request-derived URLs or
+    url-named variables (CWE-918): fetch/axios/got/Node http(s)/request and
+    XMLHttpRequest-family .open(method, url)."""
+    src = (
+        "fetch(req.query.url)\n"
+        "const r = await axios.get(request.body.redirect)\n"
+        "const resp = await got(targetUrl)\n"
+        "await fetch(userWebhook)\n"
+        "const res = await fetch(req['url'])\n"
+        "http.request(ctx.request.url, cb)\n"
+        "https.get(event.headers.referer, cb)\n"
+        "request(raw_url, cb)\n"
+        "const t = await got(`base/${req.query.u}`)\n"
+        "xhr.open('GET', request.query.url)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R031-ssrf-js"]
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], f"R031-ssrf-js mismatch: {hits}"
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_ssrf_js_literals_and_nonjs_receivers_quiet():
+    """R031-ssrf-js must not fire on literal quoted URLs, SCREAMING_CASE
+    constants, or non-JS receivers (db.fetch, router.get, api.get,
+    window.open, socket.connect)."""
+    src = (
+        "fetch('/api/users')\n"
+        "axios.post('/api/submit', { url: formUrl })\n"
+        "const res = await got(BASE_URL)\n"
+        "http.get('http://localhost:8000/health')\n"
+        "router.get('/users', listUsers)\n"
+        "app.use(requestHandler)\n"
+        "xhr.open('GET', '/static/app.js')\n"
+        "const data = await api.get(path)\n"
+        "window.open(url, '_blank')\n"
+        "db.fetch('id_123')\n"
+        "socket.connect(targetUrl)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R031-ssrf-js"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -946,6 +989,7 @@ def test_every_rule_has_test_exposure():
         "R017-redirect", "R018-debug", "R019-csrf", "R020-pem", "R021-ssrf",
         "R022-ssti", "R023-xxe", "R024-jwt", "R025-pw", "R026-upload",
         "R027-massassig", "R028-nosql", "R029-ldap", "R030-xpath",
+        "R031-ssrf-js",
     }
     assert exposed <= rids
     uncovered = rids - exposed
