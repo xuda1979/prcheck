@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -119,23 +120,92 @@ def update_or_post_comment(repo: str, pr_number: str, body: str) -> str:
     return post_via_http(repo, pr_number, body)
 
 
+# Status codes that warrant a bounded retry: transient server-side failures
+# (504/502/503/500) and rate limiting (429; GitHub also rate-limits with 403
+# plus `X-RateLimit-Remaining: 0`). 4xx client errors are not retried.
+_RETRYABLE_ERROR_CODES = {429, 500, 502, 503, 504}
+
+# Total attempts before giving up on a retryable response.
+_MAX_ATTEMPTS = 3
+
+# Backoff used when the API gives no Retry-After / reset hint.
+_BASE_BACKOFF_SECONDS = 1.0
+
+
+def _sleep(seconds: float) -> None:
+    """Injectable delay so tests can run without real waiting."""
+    time.sleep(seconds)
+
+
+def _retry_after(req_hdrs, resp_headers) -> float | None:
+    """Extract a retry delay hint from either side of the exchange.
+
+    Prefers GitHub's ``Retry-After`` (seconds); falls back to
+    ``X-RateLimit-Reset`` (epoch seconds) minus current time.
+    """
+    sentinel = object()
+    ra = resp_headers.get("Retry-After", sentinel)
+    if ra is not sentinel and ra:
+        try:
+            return max(0.0, float(ra))
+        except (TypeError, ValueError):
+            pass
+    for headers in (req_hdrs, resp_headers):
+        reset = headers.get("X-RateLimit-Reset", sentinel)
+        if reset is sentinel or not reset:
+            continue
+        try:
+            return max(0.0, float(reset) - time.time())
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def _default_api_call(
     method: str, url: str, data: dict | None = None
 ) -> dict:
-    """Shared urllib call to the GitHub API returning parsed JSON."""
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(data).encode("utf-8") if data is not None else None,
-        headers={
-            "Authorization": f"token {_token()}",
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "prcheck-action",
-        },
-        method=method,
-    )
-    with urllib.request.urlopen(req) as resp:  # noqa: S310 (explicit GitHub API)
-        raw = resp.read().decode("utf-8")
-        return json.loads(raw) if raw else {}
+    """Shared urllib call to the GitHub API returning parsed JSON.
+
+    Retries bounded times on rate-limit responses (429, or 403 when
+    ``X-RateLimit-Remaining`` is 0) and on transient 5xx errors, honoring
+    ``Retry-After`` / ``X-RateLimit-Reset`` hints with an exponential fallback.
+    Any error is re-raised unmodified once attempts are exhausted, so callers
+    keep their existing handling.
+    """
+    body = json.dumps(data).encode("utf-8") if data is not None else None
+    for attempt in range(_MAX_ATTEMPTS):
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={
+                "Authorization": f"token {_token()}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "prcheck-action",
+            },
+            method=method,
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:  # noqa: S310 (explicit GitHub API)
+                raw = resp.read().decode("utf-8")
+                return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as e:
+            retryable = e.code in _RETRYABLE_ERROR_CODES or (
+                e.code == 403
+                and (e.headers or {}).get("X-RateLimit-Remaining") == "0"
+            )
+            if not retryable or attempt == _MAX_ATTEMPTS - 1:
+                raise
+            delay = _retry_after(req.headers, e.headers or {})
+            if delay is None:
+                delay = _BASE_BACKOFF_SECONDS * (2 ** attempt)
+            print(
+                f"[prcheck] GitHub API HTTP {e.code} on {method} {url}; "
+                f"retrying in {delay:.1f}s (attempt "
+                f"{attempt + 2}/{_MAX_ATTEMPTS})",
+                file=sys.stderr,
+            )
+            _sleep(delay)
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def fetch_pr_state(repo: str, pr_number: str) -> dict:

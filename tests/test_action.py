@@ -829,3 +829,118 @@ def test_main_mergeable_and_label_failures_degrade_cleanly(
     assert "mergeable check failed: api down" in err
     assert "label sync failed: api down" in err
     assert "Traceback" not in err
+
+
+# --- shared API call retry/backoff (task #9) ------------------------------
+
+def test_default_api_call_retries_rate_limit_429(monkeypatch, capsys):
+    """429 honors Retry-After and retries to completion."""
+    import urllib.error
+    import urllib.request
+
+    from action import gh_comment
+
+    sleeps: list = []
+    monkeypatch.setattr(gh_comment, "_sleep", sleeps.append)
+    attempts = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise urllib.error.HTTPError(
+                "http://x", 429, "Too Many Requests",
+                {"Retry-After": "2"}, None,
+            )
+        return FakeResp(b'{"ok": true}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    out = gh_comment._default_api_call("GET", "http://x")
+    assert out == {"ok": True}
+    assert attempts["n"] == 2
+    assert sleeps == [2.0]
+    assert "HTTP 429" in capsys.readouterr().err
+
+
+def test_default_api_call_retries_rate_limit_403(monkeypatch):
+    """403 with X-RateLimit-Remaining: 0 is treated as rate-limited, not 4xx."""
+    import urllib.error
+    import urllib.request
+
+    from action import gh_comment
+
+    monkeypatch.setattr(gh_comment, "_sleep", lambda s: None)
+    attempts = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise urllib.error.HTTPError(
+                "http://x", 403, "Forbidden",
+                {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "9999999999"},
+                None,
+            )
+        return FakeResp(b"[]")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    gh_comment._default_api_call(
+        "DELETE", "http://x/repos/o/r/issues/7/labels/prcheck:blocked"
+    )
+    assert attempts["n"] == 2
+
+
+def test_default_api_call_does_not_retry_client_errors(monkeypatch):
+    """A 404 client error is raised immediately, with no retry or sleep."""
+    import urllib.error
+    import urllib.request
+
+    from action import gh_comment
+
+    monkeypatch.setattr(
+        gh_comment, "_sleep", lambda s: pytest.fail("client error must not sleep")
+    )
+    times = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        times["n"] += 1
+        raise urllib.error.HTTPError("http://x", 404, "Not Found", None, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        gh_comment._default_api_call("GET", "http://x")
+    assert exc.value.code == 404
+    assert times["n"] == 1
+
+
+def test_default_api_call_gives_up_after_max_attempts(monkeypatch, capsys):
+    """Persistent 5xx errors are re-raised after the bounded retries."""
+    import urllib.error
+    import urllib.request
+
+    from action import gh_comment
+
+    sleeps: list = []
+    monkeypatch.setattr(gh_comment, "_sleep", sleeps.append)
+    times = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        times["n"] += 1
+        raise urllib.error.HTTPError(
+            "http://x", 503, "Service Unavailable", None, None
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        gh_comment._default_api_call("GET", "http://x")
+    assert exc.value.code == 503
+    assert times["n"] == gh_comment._MAX_ATTEMPTS
+    assert sleeps == [1.0, 2.0]  # exponential fallback when no hint header
+    err = capsys.readouterr().err
+    assert err.count("GitHub API HTTP 503") == 2
