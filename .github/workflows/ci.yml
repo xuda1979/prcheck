@@ -31,3 +31,10 @@ jobs:
       - name: Test
         run: |
           python -m pytest -q
+
+      - name: CLI smoke (entry point, report, gate)
+        run: |
+          prcheck --version
+          prcheck -d tests/fixtures/example_pr.diff -o "$RUNNER_TEMP/report.md"
+          test -s "$RUNNER_TEMP/report.md"
+          prcheck -d tests/fixtures/example_pr.diff --exit-code fail-at-high >/dev/null && exit 1 || test $? -eq 1
