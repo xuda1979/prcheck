@@ -11,12 +11,11 @@ from pathlib import Path
 from typing import Optional
 
 from . import __version__
-from .diff import compute_stats, parse_diff
-from .issues import Issue, filter_issues
+from .diff import parse_diff
+from .engine import run_analysis
+from .issues import Issue
 from .llm import Summarizer
-from .openapi import load_spec
 from .render import render_markdown, render_sarif
-from .rules import run_rules
 
 
 def _read(path: str | Path) -> str:
@@ -203,44 +202,28 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     cached = cache.get(key)
     if cached is not None:
-        files = parse_diff(diff_text)
-        issues = [Issue(**f) for f in cached["findings"]]
-        stat = cached["stats"]
+        issues = [Issue(**f) for f in cached["issues"]]
+        stat = cached["stat"]
         openapi_changes = cached["openapi"]
         semver: Optional[dict] = cached.get("semver")
         print(f"[cache] hit {key}", file=sys.stderr)
     else:
-        files = parse_diff(diff_text)
-        issues = run_rules(files)
-        issues = filter_issues(
-            issues,
+        result = run_analysis(
+            diff_text,
+            base_spec_text=spec_texts[0] if spec_texts else None,
+            new_spec_text=spec_texts[1] if spec_texts else None,
+            base_spec_name=args.openapi_old or "",
+            new_spec_name=args.openapi_new or "",
             security_only=args.security_only,
             data_only=args.data_only,
             behavior_only=args.behavior_only,
             min_severity=args.min_severity,
         )
-        stat = compute_stats(files)
-
-        openapi_changes: list[dict] = []
-        semver = None
-        if args.openapi_old and args.openapi_new and spec_texts:
-            old_spec = load_spec(spec_texts[0], args.openapi_old)
-            new_spec = load_spec(spec_texts[1], args.openapi_new)
-            from .openapi import compare_specs, infer_semver
-
-            changes = compare_specs(old_spec, new_spec)
-            semver = infer_semver(old_spec.version_string, new_spec.version_string, changes)
-            openapi_changes = [c.to_dict() for c in changes]
-
-        cache.put(
-            key,
-            {
-                "findings": [i.__dict__ for i in issues],
-                "stats": stat,
-                "openapi": openapi_changes,
-                "semver": semver,
-            },
-        )
+        issues = result.issues
+        stat = result.stat
+        openapi_changes = result.openapi_changes
+        semver = result.semver
+        cache.put(key, result.as_dict())
 
     high_issues = [i for i in issues if i.severity == "high"]
     gate_failed = args.require_high_ok and bool(high_issues)

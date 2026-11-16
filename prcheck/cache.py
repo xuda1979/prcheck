@@ -18,7 +18,9 @@ from pathlib import Path
 
 # Bump whenever the rule engine / OpenAPI comparison changes in a way that
 # changes output for the same input; stale cache entries then simply miss.
-ENGINE_VERSION = "6"
+# 7: cache payload schema moved from findings/stats to issues/stat (shared
+#    engine), and the CLI now runs through prcheck/engine.run_analysis().
+ENGINE_VERSION = "7"
 
 
 def _hash(s: str) -> str:
