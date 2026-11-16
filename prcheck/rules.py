@@ -71,7 +71,8 @@ _RULE_TUPLES = [
         "medium",
         "Potential SQL injection (string-built queries)",
         r"(?i)\b(?:execute|executemany|query)\(\s?(?:f[\'\"])|"
-        r"(?:\"[^\"]*\{[^\"]*\}\")?\s*%|"
+        # quoted statement string using the %-interpolation operator
+        r"[\"'][^\"'\n]*\b(?:SELECT|INSERT|UPDATE|DELETE|WHERE|FROM|JOIN)\b[^\"'\n]*[\"']\s*%|"
         r"(?:SELECT|INSERT|UPDATE|DELETE)[^\n;]*\+[^\n;]*|"
         r"(?:SELECT|INSERT|UPDATE|DELETE)[^\n;]*\b(?:\.format\(|f[\'\"])",
     ),

@@ -65,6 +65,29 @@ def test_dependency_rule_fires_on_unquoted_requirements_pins():
     assert "flask" not in lines, "an unpinned dependency must not match"
 
 
+def test_sql_rule_does_not_fire_on_plain_modulo():
+    """R005 must only flag SQL strings built with the % operator.
+
+    Regression: the % alternative used to match a bare `%` anywhere, so
+    arithmetic modulo (`total % count`), the logging `%d%%` idiom, and
+    percent-formatted f-strings all raised false SQL-injection findings.
+    """
+    src = (
+        "cur.execute('SELECT * FROM t WHERE id = %s' % uid)\n"
+        "query = 'SELECT %s FROM t' % cols\n"
+        'sql = "SELECT * FROM users WHERE id = {}" % user_id\n'
+        "avg = total % count\n"
+        'name = "hello %s" % user\n'
+        'logging.info("progress %d%%", n)\n'
+        'f"{value:0.2f}%"\n'
+        'cur.execute("SELECT * FROM t WHERE id = ?", (uid,))\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R005"]
+    lines = [i.line for i in hits]
+    assert lines == [1, 2, 3], f"R005 fired on non-SQL modulo lines: {lines}"
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
