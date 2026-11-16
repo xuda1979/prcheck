@@ -37,6 +37,32 @@ def test_hardcoded_secret_high():
     assert sev[0].path == "src/keys.py"
 
 
+def test_hardcoded_secret_compound_names_flagged():
+    """R002 fires on underscore-joined secret names, not just bare keywords.
+
+    Regression: the plain form requires a token boundary after the keyword, so
+    `SECRET_KEY`, `DJANGO_SECRET_KEY`, `MYSQL_PASSWORD`, `ACCESS_TOKEN`,
+    `JWT_SECRET` and dict/quoted-key forms all escaped detection.
+    """
+    src = (
+        "SECRET_KEY = 'sk-12345678'\n"
+        "DJANGO_SECRET_KEY = 'd-jango-9f8e7d6c5b4a'\n"
+        "MYSQL_PASSWORD = 'hunter2!!'\n"
+        "ACCESS_TOKEN = 'abc123456'\n"
+        "GITHUB_TOKEN = 'ghp_1234567890abcd'\n"
+        "JWT_SECRET = 'eyJhbGciOiJIUzI1NiJ9'\n"
+        "client_secret = 'a1b2c3d4e5f6g7'\n"
+        "'secret': '0123456789abcdef'\n"
+        "tokenizer = 'abc12345'\n"            # not a secret: must NOT fire
+        "not_a_secret_value = 'xyz'\n"          # ditto
+        "SOCKET_TIMEOUT = 30\n"                # not a quoted secret: must NOT fire
+        "GITHUB_TOKEN = os.environ['GITHUB_TOKEN']\n"  # env-driven: must NOT fire
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="keys.py"))
+    hits = [i.line for i in issues if i.rule_id == "R002"]
+    assert hits == [1, 2, 3, 4, 5, 6, 7, 8], f"R002 line mismatch: {hits}"
+
+
 def test_dependency_rule_fires_on_manifest():
     issues, _ = analyze_to_issues(FIXTURE.read_text())
     deps = [i for i in issues if i.rule_id == "R006-deps"]

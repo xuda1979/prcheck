@@ -46,8 +46,22 @@ _RULE_TUPLES = [
         "security",
         "high",
         "Hardcoded credential/key/secret in diff",
+        # Plain keyword form:  password = "…",  api_key = "…",  'secret': "…"
+        # The trailing \b after the keyword demands a token boundary, so a bare
+        # `KEY=` inside a longer underscore-joined name cannot match here.
         r"(?i)\b(?:api[_-]?key|secret|token|passw(?:ord|d)|password|credential|pwd|auth[_-]?key|private[_-]?key)\b"
-        r"\s*(?:=|:)\s*[\"\'][A-Za-z0-9_@#$%^&*+!./\\-]{6,}[\"\']",
+        r"\s*(?:=|:)\s*[\"\'][A-Za-z0-9_@#$%^&*+!./\\-]{6,}[\"\']|"
+        # Compound-name form:  SECRET_KEY = "…",  DJANGO_SECRET_KEY,  ACCESS_TOKEN,
+        # MYSQL_PASSWORD,  JWT_SECRET,  client_secret,  secret['secret'] = "…"
+        # The keyword appears as an underscore-joined identifier component (either
+        # preceded by `_` or at the very start of the identifier), with an optional
+        # key-ish suffix (base / id / hash …), then the separator. Tolerates an
+        # opening `[`/`'`/`"` between identifier and `=` for dict/config forms.
+        r"(?:(?<=_)|(?<![A-Za-z0-9_]))(?:passw(?:ord|d)|password|pwd|token|secret|credential"
+        r"|api[_-]?key|auth[_-]?key|private[_-]?key|signing[_-]?key|encryption[_-]?key"
+        r"|jwt[_-]?secret|client[_-]?secret)"
+        r"(?:[_-](?:key(?:_base)?|base|id|token|secret|pass|passwd|hash))?[\]\"\']*[ \t]*"
+        r"[:=]\s*[\"\'][A-Za-z0-9_@#$%^&*+!./\\-]{6,}[\"\']",
         "Possible secret committed",
     ),
     (
