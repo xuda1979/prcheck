@@ -311,6 +311,23 @@ def test_csrf_disabled_flagged():
     assert hits == [1, 2, 3, 4, 5, 6], f"R019-csrf line mismatch: {hits}"
 
 
+def test_committed_private_key_material_flagged():
+    """R020-pem flags PEM private-key block headers, never public keys/certs."""
+    src = (
+        "-----BEGIN RSA PRIVATE KEY-----\n"
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+        "key = '-----BEGIN EC PRIVATE KEY-----'\n"
+        "-----BEGIN PGP PRIVATE KEY BLOCK-----\n"
+        "-----BEGIN PUBLIC KEY-----\n"          # public: must NOT fire
+        "-----BEGIN CERTIFICATE-----\n"          # ditto
+        "-----END RSA PRIVATE KEY-----\n"        # end marker: must NOT fire
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="keys.pem"))
+    hits = [i for i in issues if i.rule_id == "R020-pem"]
+    assert [i.line for i in hits] == [1, 2, 3, 4], f"R020-pem line mismatch: {hits}"
+    assert all(i.severity == "high" for i in hits)
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -470,7 +487,7 @@ def test_every_rule_has_test_exposure():
         "R001-a", "R001-b", "R002", "R003", "R004", "R005",
         "R006-deps", "R007-cors", "R008", "R009", "R010", "R011-session",
         "R012-cmd", "R013-path", "R014-xss", "R015-crypto", "R016-random",
-        "R017-redirect", "R018-debug", "R019-csrf",
+        "R017-redirect", "R018-debug", "R019-csrf", "R020-pem",
     }
     assert exposed <= rids
     uncovered = rids - exposed

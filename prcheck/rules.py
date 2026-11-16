@@ -265,6 +265,22 @@ _RULE_TUPLES = [
         r"['\"](?:WTF_)?CSRF_ENABLED['\"]\s*:\s*(?:False|0\b)",
         "Keep CSRF protection enabled; only a tokenless public API may disable it",
     ),
+    (
+        "R020-pem",
+        "security",
+        "high",
+        "Committed private key material (PEM or unsupported format)",
+        # PEM private-key headers. The alternation is conservative: only a
+        # *private* or *encrypted private* key block heading fires — public
+        # keys, certificates and CRLs never match, and END markers are excluded
+        # so only freshly added key material (not pre-existing headers) is
+        # flagged. The unencrypted form of an encrypted key is just a private
+        # key, so any private key variety matches; non-PEM "opaque" formats are
+        # vendored into ssl._create_unverified_context and don't use this marker.
+        r"-----BEGIN\s+(?:(?:RSA|EC|DSA|OPENSSH|PGP|ENCRYPTED)\s+)?PRIVATE\s+KEY"
+        r"(?:\s+BLOCK)?-----",
+        "Private key material must not be committed; rotate and load from a secret store",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
