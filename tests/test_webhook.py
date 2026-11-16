@@ -202,3 +202,117 @@ def test_webhook_cli_missing_payload_usage(tmp_path):
     assert res.returncode == 1
     assert "usage:" in res.stderr
     assert "Traceback" not in res.stderr
+
+
+def test_parse_pull_request_event_flat_and_nested():
+    """Raw GitHub pull_request events flatten into the bridge shape."""
+    from action.webhook import parse_pull_request_event
+
+    flat = parse_pull_request_event({"number": 7, "pr": "7"})
+    assert flat["pr"] == "7"
+
+    raw = {
+        "action": "opened",
+        "number": 7,
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {
+            "number": 7,
+            "diff_url": "https://api.github.com/repos/owner/repo/pulls/7",
+        },
+    }
+    norm = parse_pull_request_event(raw)
+    assert norm["repo"] == "owner/repo"
+    assert norm["pr"] == "7"
+    assert norm["diff_url"] == "https://api.github.com/repos/owner/repo/pulls/7"
+
+    # a non-PR event has no repo/pr to extract
+    empty = parse_pull_request_event({"action": "ping"})
+    assert empty["repo"] == "" and empty["pr"] == ""
+
+
+def test_wsgi_accepts_raw_github_event(monkeypatch):
+    """A raw pull_request event drives the full analysis through WSGI."""
+    import io
+
+    from action import webhook
+
+    diff = (FIXTURES / "example_pr.diff").read_text()
+    monkeypatch.setattr(
+        webhook.urllib.request, "urlopen", lambda req, timeout=None: FakeResponse(diff)
+    )
+    event = {
+        "action": "opened",
+        "number": 7,
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {
+            "number": 7,
+            "diff_url": "https://api.github.com/repos/owner/repo/pulls/7",
+        },
+    }
+    payload = json.dumps(event).encode()
+    captured = {}
+    body_iter = webhook.wsgi_app(
+        {
+            "REQUEST_METHOD": "POST",
+            "CONTENT_LENGTH": str(len(payload)),
+            "wsgi.input": io.BytesIO(payload),
+        },
+        lambda status, headers: captured.update(status=status),
+    )
+    data = json.loads(b"".join(body_iter).decode())
+    assert captured["status"].startswith("200")
+    assert data["result"]["stat"]["files_changed"] == 6
+
+
+def test_wsgi_rejects_bad_signature(monkeypatch):
+    """With WEBHOOK_SECRET set, a bad X-Hub-Signature-256 is a clean 401."""
+    import io
+
+    from action import webhook
+
+    monkeypatch.setenv("WEBHOOK_SECRET", "s3cret")
+    payload = json.dumps({"diff": "+x\n"}).encode()
+    captured = {}
+    body = b""
+    for chunks in webhook.wsgi_app(
+        {
+            "REQUEST_METHOD": "POST",
+            "CONTENT_LENGTH": str(len(payload)),
+            "wsgi.input": io.BytesIO(payload),
+            "HTTP_X_HUB_SIGNATURE_256": "sha256=deadbeef",
+        },
+        lambda status, headers: captured.update(status=status),
+    ):
+        body += chunks
+    assert captured["status"].startswith("401")
+    assert "invalid X-Hub-Signature-256" in body.decode()
+
+
+def test_wsgi_accepts_valid_signature(monkeypatch):
+    """A correct HMAC over the event body passes the gate."""
+    import hashlib
+    import hmac
+    import io
+
+    from action import webhook
+
+    monkeypatch.setenv("WEBHOOK_SECRET", "s3cret")
+    diff = (FIXTURES / "example_pr.diff").read_text()
+    payload = json.dumps({"diff_url": "https://api.github.com/repos/o/r/pulls/1"}).encode()
+    monkeypatch.setattr(
+        webhook.urllib.request, "urlopen", lambda req, timeout=None: FakeResponse(diff)
+    )
+    sig = "sha256=" + hmac.new(b"s3cret", payload, hashlib.sha256).hexdigest()
+    captured = {}
+    body_iter = webhook.wsgi_app(
+        {
+            "REQUEST_METHOD": "POST",
+            "CONTENT_LENGTH": str(len(payload)),
+            "wsgi.input": io.BytesIO(payload),
+            "HTTP_X_HUB_SIGNATURE_256": sig,
+        },
+        lambda status, headers: captured.update(status=status),
+    )
+    data = json.loads(b"".join(body_iter).decode())
+    assert captured["status"].startswith("200")
+    assert data["result"]["stat"]["files_changed"] == 6

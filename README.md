@@ -130,6 +130,16 @@ Payload: `{"diff": "...", "repo": "owner/repo", "pr": "7",
 "base_spec": "<inline or path>", "head_spec": "<inline or path>"}`. Gate /
 comment behavior honors the same `INPUT_*` env vars as the action.
 
+The bridge also accepts **raw GitHub `pull_request` webhook events** directly
+(the shape GitHub sends a hosted App): `repository.full_name`,
+`pull_request.diff_url` and the PR number are extracted automatically, so a
+hosted App can forward the unmodified event body.
+
+Set `WEBHOOK_SECRET` to verify every request against GitHub's
+`X-Hub-Signature-256` header before analysis (HMAC-SHA256). Forged or
+unauthenticated events get a clean `401` instead of being analyzed or posting
+comments.
+
 The bridge can also fetch a PR's diff itself: pass `"diff_url"` (a GitHub PR
 URL such as `https://api.github.com/repos/owner/repo/pulls/7`) instead of an
 inline `diff`. The diff is fetched with the GitHub API's unified-diff media
