@@ -264,6 +264,76 @@ def test_wsgi_accepts_raw_github_event(monkeypatch):
     assert data["result"]["stat"]["files_changed"] == 6
 
 
+def test_handle_event_posts_comment_fresh(monkeypatch):
+    """INPUT_POST_COMMENT posts a fresh report via the upsert (GET->POST)."""
+    from action import webhook, gh_comment
+
+    diff = (FIXTURES / "example_pr.diff").read_text()
+    monkeypatch.setenv("INPUT_POST_COMMENT", "true")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    calls = []
+
+    class FakeURLOpen:
+        def __call__(self, req, timeout=None):
+            calls.append((req.method, req.full_url, req.data.decode() if req.data else None))
+            if req.method == "GET":
+                return FakeResponse("[]")  # no previous report comment
+            if req.method == "POST":
+                return FakeResponse('{"html_url": "https://github.com/owner/repo/pull/7#issuecomment-99"}')
+            raise AssertionError(f"unexpected method {req.method}")
+
+    monkeypatch.setattr(gh_comment.urllib.request, "urlopen", FakeURLOpen())
+    monkeypatch.setattr(webhook.urllib.request, "urlopen", FakeURLOpen())
+
+    out = webhook.handle_event({"diff": diff, "repo": "owner/repo", "pr": "7"})
+    assert out["gate"]["comment_url"] == "https://github.com/owner/repo/pull/7#issuecomment-99"
+    methods = [c[0] for c in calls]
+    assert methods == ["GET", "POST"]
+    get_url = calls[0][1]
+    assert get_url.endswith("/repos/owner/repo/issues/7/comments")
+    body = calls[1][2]
+    assert "<!-- prcheck-report -->" in body
+    assert body.count("<!-- prcheck-report -->") == 1
+
+
+def test_handle_event_posts_comment_updates_existing(monkeypatch):
+    """A prior report comment is PATCHed in place by the bridge upsert."""
+    from action import webhook, gh_comment
+
+    diff = (FIXTURES / "example_pr.diff").read_text()
+    monkeypatch.setenv("INPUT_POST_COMMENT", "true")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    calls = []
+
+    class FakeURLOpen:
+        def __call__(self, req, timeout=None):
+            calls.append((req.method, req.full_url, req.data.decode() if req.data else None))
+            if req.method == "GET":
+                return FakeResponse('[{"id": 91, "body": "old report\\n\\n<!-- prcheck-report -->"}]')
+            if req.method == "PATCH":
+                return FakeResponse('{"html_url": "https://github.com/owner/repo/pull/7#issuecomment-91"}')
+            raise AssertionError(f"unexpected method {req.method}")
+
+    monkeypatch.setattr(gh_comment.urllib.request, "urlopen", FakeURLOpen())
+    monkeypatch.setattr(webhook.urllib.request, "urlopen", FakeURLOpen())
+
+    out = webhook.handle_event({"diff": diff, "repo": "owner/repo", "pr": "7"})
+    assert out["gate"]["comment_url"] == "https://github.com/owner/repo/pull/7#issuecomment-91"
+    methods = [c[0] for c in calls]
+    assert methods == ["GET", "PATCH"]
+    assert calls[1][1].endswith("/repos/owner/repo/issues/comments/91")
+    assert calls[1][2].count("<!-- prcheck-report -->") == 1
+
+
+def test_handle_event_no_comment_without_flag(monkeypatch):
+    """Without INPUT_POST_COMMENT the bridge returns no comment URL."""
+    from action.webhook import handle_event
+
+    monkeypatch.delenv("INPUT_POST_COMMENT", raising=False)
+    out = handle_event({"diff": "+x\n", "repo": "owner/repo", "pr": "7"})
+    assert out["gate"]["comment_url"] is None
+
+
 def test_wsgi_rejects_bad_signature(monkeypatch):
     """With WEBHOOK_SECRET set, a bad X-Hub-Signature-256 is a clean 401."""
     import io
