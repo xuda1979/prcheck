@@ -82,7 +82,15 @@ _RULE_TUPLES = [
         "security",
         "medium",
         "eval / exec / pickling of untrusted input",
-        r"(?i)\b(?:eval|exec|compile)\s*\(|pickle\.loads\(|yaml\.unsafe_load\(|dill\.loads\(|joblib\.load\(",
+        r"(?i)\b(?:eval|exec|compile)\s*\(|"
+        r"\b(?:pickle|cPickle|_pickle|dill|marshal|joblib)\.(?:load|loads)\s*\(|"
+        r"\b(?:pickle|cPickle|_pickle|dill)\.Unpickler\s*\(|"
+        r"\byaml\.(?:full_load(?:_all)?|unsafe_load(?:_all)?)\s*\(|"
+        r"\byaml\.load(?:_all)?\s*\((?![^)\n]*\bLoader\s*=\s*yaml\.(?:SafeLoader|BaseLoader)\b)|"
+        r"\b(?:numpy|np)\.load\s*\([^)\n]*allow_pickle\s*=\s*True\b|"
+        r"\btorch\.load\s*\(|"
+        r"\b(?:pandas|pd)\.read_pickle\s*\(|"
+        r"\bshelve\.open\s*\(",
     ),
     (
         "R005",

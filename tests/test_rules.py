@@ -155,6 +155,25 @@ def test_pii_snake_case_suffix_flagged_in_field_context():
     assert hits == [1, 2, 3], f"D001 suffix mismatch: {hits}"
 
 
+def test_insecure_deserialization_sinks_flagged():
+    """R004 flags the CWE-502 sink family; safe loaders / plain loads stay quiet."""
+    src = (
+        "obj = pickle.Unpickler(buf)\n"
+        "data = pickle.load(f)\n"
+        "cfg = yaml.load(text)\n"
+        "arr = np.load(path, allow_pickle=True)\n"
+        "model = torch.load('ckpt.pt')\n"
+        "df = pd.read_pickle('data.pkl')\n"
+        "store = shelve.open('db.store')\n"
+        "safe = yaml.load(stream, Loader=yaml.SafeLoader)\n"  # safe loader
+        "data = json.loads(raw)\n"  # not despatch/pickle
+        "pickle.dumps(obj)\n"  # serialization, not deserialization
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i.line for i in issues if i.rule_id == "R004"]
+    assert hits == [1, 2, 3, 4, 5, 6, 7], f"R004 line mismatch: {hits}"
+
+
 def test_create_table_ddl_and_raise_http_error_status_flagged():
     """D002-bb flags raw CREATE TABLE DDL; B003 flags raise Http404 / abort(404)."""
     src = (
@@ -506,7 +525,9 @@ _UNCOVERED_RULE_CASES = [
         "medium",
         "eval(code)\n"
         "data = pickle.loads(raw)\n"
-        "yaml.unsafe_load(text)\n",
+        "yaml.unsafe_load(text)\n"
+        "yaml.load(text)\n"
+        "torch.load('ckpt.pt')\n",
     ),
     (
         "R009",
