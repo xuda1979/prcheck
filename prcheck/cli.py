@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Optional
 
 from . import __version__
-from .diff import parse_diff
 from .engine import run_analysis
 from .issues import Issue
 from .llm import Summarizer
