@@ -129,11 +129,16 @@ _RULE_TUPLES = [
         "high",
         "Command executed via shell (possible OS command injection)",
         # Direct shell entry points; subprocess with shell=True; any shell or
-        # subprocess exec built by string concatenation / interpolation.
+        # subprocess exec built by string concatenation / interpolation; and
+        # shell array invocation with an "-c" command string
+        # (e.g. subprocess.run(["sh", "-c", user_cmd])).
         r"\b(?:os|commands)\.(?:system|popen)\s*\(|"
         r"\bsubprocess\.(?:call|run|Popen|check_call|check_output)\s*\([^\n]*shell\s*=\s*(?:True|\w+)|"
         r"\b(?:os\.system|os\.popen|subprocess\.(?:call|run|Popen|check_call|check_output))"
-        r"\s*\([^\n]*(?:\+|\s*%\s*[\'\"]|f[\'\"])",
+        r"\s*\([^\n]*(?:\+|\s*%\s*[\'\"]|f[\'\"])|"
+        r"\bsubprocess\.(?:call|run|Popen|check_call|check_output)\s*\(\s*\["
+        r"\s*[\"'][^\"']*\b(?:sh|bash|zsh|ksh|csh|tcsh|dash|ash|fish|pwsh|powershell)\b"
+        r"[\"' \t-]*\s*,\s*[\"']-c[\"']",
         "Prefer argument lists over shell strings; validate/quote any variable input",
     ),
     # ---- data -----------------------------------------------------

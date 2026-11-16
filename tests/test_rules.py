@@ -134,7 +134,8 @@ _UNCOVERED_RULE_CASES = [
         "os.popen('ls -l ' + user_input)\n"
         "subprocess.run('grep ' + term, shell=True)\n"
         "subprocess.Popen(f'curl {url}', shell=True)\n"
-        "subprocess.check_call(cmd, shell=shell_enabled)\n",
+        "subprocess.check_call(cmd, shell=shell_enabled)\n"
+        "subprocess.run([\"sh\", \"-c\", user_cmd])\n",
     ),
 ]
 
