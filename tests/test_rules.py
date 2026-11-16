@@ -226,6 +226,24 @@ def test_sql_rule_does_not_fire_on_plain_modulo():
     assert lines == [1, 2, 3], f"R005 fired on non-SQL modulo lines: {lines}"
 
 
+def test_debug_mode_and_log_level_flagged():
+    """R018-debug flags truthy debug flags and DEBUG-level logging config."""
+    src = (
+        "app.debug = True\n"
+        "DEBUG = True\n"
+        "app.run(debug=True, port=8080)\n"
+        "logging.basicConfig(level=logging.DEBUG)\n"
+        "logger.setLevel(logging.DEBUG)\n"
+        "app.debug = False\n"  # disabled: must NOT fire
+        "DEBUG = False\n"  # ditto
+        "DEBUG = os.environ.get('DEBUG', '0')\n"  # env-driven: must NOT fire
+        "debug = True\n"  # bare lowercase var: must NOT fire
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i.line for i in issues if i.rule_id == "R018-debug"]
+    assert hits == [1, 2, 3, 4, 5], f"R018-debug line mismatch: {hits}"
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -337,6 +355,14 @@ _UNCOVERED_RULE_CASES = [
         "return redirect(url)\n"
         "return redirect(next_url)\n",
     ),
+    (
+        "R018-debug",
+        "security",
+        "low",
+        "app.debug = True\n"
+        "DEBUG = True\n"
+        "logger.setLevel(logging.DEBUG)\n",
+    ),
 ]
 
 
@@ -368,7 +394,7 @@ def test_every_rule_has_test_exposure():
         "R001-a", "R001-b", "R002", "R003", "R004", "R005",
         "R006-deps", "R007-cors", "R008", "R009", "R010", "R011-session",
         "R012-cmd", "R013-path", "R014-xss", "R015-crypto", "R016-random",
-        "R017-redirect",
+        "R017-redirect", "R018-debug",
     }
     assert exposed <= rids
     uncovered = rids - exposed

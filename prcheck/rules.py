@@ -215,6 +215,23 @@ _RULE_TUPLES = [
         r"redirect_to|(?<!request\.)\burl\b)",
         "Whitelist redirect targets; never trust a full URL from the client",
     ),
+    (
+        "R018-debug",
+        "security",
+        "low",
+        "Debug mode / verbose logging enabled",
+        # Debug flag assigned a truthy value (Flask app.run/app.debug, Django-style
+        # uppercase DEBUG constant) or a logger configured at DEBUG level. Must be
+        # an explicit truthy value so `app.debug = False` and env-driven
+        # `DEBUG = os.environ.get(...)` assignments stay quiet; the scoped
+        # (?-i:DEBUG) re-enables case sensitivity so lowercase identifiers like
+        # `debug = True` do not fire.
+        r"(?i)\b(?:app|application)\.debug\s*=\s*(?:True|1\b)|"
+        r"(?-i:DEBUG)\b\s*=\s*(?:True|1\b)|"
+        r"\b(?:app|application)\.run\s*\([^\n]*\bdebug\s*=\s*(?:True|1\b)|"
+        r"\blevel\s*=\s*logging\.DEBUG\b|\bsetLevel\s*\(\s*logging\.DEBUG\b",
+        "Disable debug mode and DEBUG-level logging before production",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
