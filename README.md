@@ -183,7 +183,9 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   disabled, committed private key material (PEM key blocks), server-side
   template injection (SSTI), XXE (XML parsers fed request-derived data), JWT
   verification disabled / alg=none accepted, plaintext password storage
-  (password fields assigned raw request input or bare variables).
+  (password fields assigned raw request input or bare variables), unrestricted
+  file upload (request.files saved directly or .save() targets fed a filename
+  attribute / request data / os.path.join with a filename).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

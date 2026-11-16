@@ -447,6 +447,30 @@ _RULE_TUPLES = [
         r")",
         "Store only a salted hash of a password (bcrypt/argon2/PBKDF2); never assign raw input or a bare variable",
     ),
+    (
+        "R026-upload",
+        "security",
+        "high",
+        "User-supplied file save without validation (unrestricted upload / path in save target)",
+        # (A) request.files/request.FILES storage saved directly — the classic
+        #     `request.files['x'].save(dest)` (CWE-434): the storage object is
+        #     saved straight from the request with no extension check.
+        r"(?i)(?:"
+        r"\brequest\s*\.\s*(?:files|FILES)\s*(?:\[\s*[^)\]\n]+\s*\]"
+        r"|\s*\.\s*get\s*\([^)\n]*\))?\s*\.\s*save\s*\("
+        r"|"
+        # (B) any .save(…) whose target is user-influenced: a filename attribute
+        #     (file.filename / request.files['f'].filename), os.path.join with a
+        #     filename component, or a request-data token (request.args/form/json/
+        #     … — NOT request.user/session, so ORM `save(owner=...request.user)`
+        #     stays quiet). ORM no-arg save() and literal-path saves (Pillow/PDF)
+        #     stay quiet because the reference is required.
+        r"\b[\w.]*[a-z][\w.]*\.save\s*\(\s*(?=[^)\n]*\bfilename\b|"
+        r"os\.path\.join\s*\([^)\n]*\bfilename\b|"
+        r"[^)\n]*request\.(?:args|values|form|headers|json|data|get_json|get_data)\b)"
+        r")",
+        "Validate file type/size and control the destination path; never save request files to a user-influenced or derived path",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
