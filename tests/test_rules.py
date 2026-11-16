@@ -682,6 +682,57 @@ def test_nosql_literals_and_non_mongo_quiet():
     assert not [i for i in issues if i.rule_id == "R028-nosql"], issues
 
 
+def test_ldap_injection_search_flagged():
+    """R029-ldap flags LDAP search calls fed request-derived input as
+    filter/dn arguments (CWE-90): python-ldap search_s/search_st/search_ext
+    family on any receiver, plus ldap3-style bare .search on ldap/conn-named
+    receivers. Indexed reads and .get() ARE payloads here."""
+    src = (
+        "conn.search_s(base, SCOPE_SUBTREE, '(&(uid=' + request.form['uid'] + '))')\n"
+        "ldap_conn.search_s(base, scope, request.args.get('filter'))\n"
+        "con.search_st(base, scope, request.form['user'] + ')*')\n"
+        "admin_conn.search_ext_s(base, scope, request.get_json()['flt'])\n"
+        "connection.search_ext(base, scope, request.data)\n"
+        "server_conn.search_s(base, SCOPE_BASE, request.headers.get('X-Filter'))\n"
+        "conn.search(base, '(uid=' + request.form['uid'] + ')')\n"
+        "ldap3.search(base, request.form['q'])\n"
+        "server.ldap.search(base, request.args.get('user'))\n"
+        "ldap_handle.search(base, request.json)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R029-ldap"]
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], f"R029-ldap mismatch: {hits}"
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_ldap_injection_literals_and_generic_search_quiet():
+    """R029-ldap must not fire on literal filters, non-search LDAP methods,
+    same-line escape_filter_chars/escape_dn_chars sanitization, or generic
+    search-engine receivers (es/client/index/results/arr/db/page)."""
+    src = (
+        "conn.search_s(base, scope, '(uid=jdoe)')\n"
+        "conn.search_s(base, scope, '(uid=%s)' % uid)\n"
+        "conn.search_s(base, scope, user_filter)\n"
+        "ldap_conn.delete_s(dn)\n"
+        "conn.search_s(base, scope, ldap.filter.escape_filter_chars(request.form['uid']))\n"
+        "conn.search(base, scope, ldap.dn.escape_dn_chars(request.form['uid']))\n"
+        "es.search(index='idx', body=request.json)\n"
+        "client.search(request.args['q'])\n"
+        "index.search('users', '*:*')\n"
+        "results.search(request.form['q'])\n"
+        "arr.search(u => u.id === request.form['id'])\n"
+        "db.search(request.form['x'])\n"
+        "page.search(request.args['q'])\n"
+        "conn.search('static filter')\n"
+        "ldap_conn.search_s(base, scope, fixed_filter)\n"
+        "request.form.get('q')\n"
+        "filter = request.args.get('filter')\n"
+        "logger.info('uid=%s', request.form['uid'])\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R029-ldap"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -847,7 +898,7 @@ def test_every_rule_has_test_exposure():
         "R012-cmd", "R013-path", "R014-xss", "R015-crypto", "R016-random",
         "R017-redirect", "R018-debug", "R019-csrf", "R020-pem", "R021-ssrf",
         "R022-ssti", "R023-xxe", "R024-jwt", "R025-pw", "R026-upload",
-        "R027-massassig", "R028-nosql",
+        "R027-massassig", "R028-nosql", "R029-ldap",
     }
     assert exposed <= rids
     uncovered = rids - exposed

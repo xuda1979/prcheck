@@ -555,6 +555,43 @@ _RULE_TUPLES = [
         r")",
         "Never feed a raw request dict into a Mongo-family query; sanitize/whitelist filter keys (esp. $where, $gt, $regex) or attacker-controlled operators reach the query",
     ),
+    (
+        "R029-ldap",
+        "security",
+        "medium",
+        "LDAP injection: request-derived input in an LDAP search filter / dn",
+        # Fires when an LDAP search call is fed request-derived input as (part
+        # of) its filter/dn arguments on a single added line (CWE-90):
+        #   (A) a python-ldap-style search family — .search_s / .search_st /
+        #       .search_ext / .search_ext_s — with ANY receiver, whose argument
+        #       list contains a request-derived token (request.POST/form/json/
+        #       args/data/values/cookies/headers/get_json/get_data; indexed
+        #       reads and .get() ARE injection payloads here — a filter string
+        #       built from a field read is exactly the vulnerable case).
+        #   (B) an ldap3-style bare .search whose receiver chain contains an
+        #       ldap- or conn-named segment (ldap, ldap3, ldap_conn, conn,
+        #       connection, …) and whose argument list contains a
+        #       request-derived token.  This keeps search-engine / generic
+        #       .search receivers (es.search, client.search, index.search,
+        #       results.search, arr.search callbacks, db.search) quiet.
+        # A same-line escape_filter_chars / escape_dn_chars call marks the
+        # payload as sanitized (python-ldap/ldap3 escaping helpers) and
+        # suppresses the finding.
+        r"(?i)(?!.*\bescape_(?:filter|dn)_chars\b)(?:"
+        # (A) python-ldap search family: any receiver, request token in args.
+        r"(?<![\w.])(?!request\.)[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*"
+        r"\.\s*(?:search_st|search_ext_s|search_ext|search_s)\s*\("
+        r"(?=[^)\n]*\brequest\.(?:POST|form|json|args|data|values|cookies|headers|"
+        r"get_json|get_data))"
+        r"|"
+        # (B) ldap3-style bare .search with an ldap/conn-named receiver chain.
+        r"(?<![\w.])(?!request\.)(?:[A-Za-z_]\w*\.)*?(?:\bldap\w*|conn\w*)"
+        r"(?:\.[A-Za-z_]\w*)*?\.\s*search\s*\("
+        r"(?=[^)\n]*\brequest\.(?:POST|form|json|args|data|values|cookies|headers|"
+        r"get_json|get_data))"
+        r")",
+        "LDAP search filters/dns built from request input allow filter injection; escape with ldap.filter.escape_filter_chars / ldap.dn.escape_dn_chars (python-ldap) or ldap3.utils.conv escape helpers",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
