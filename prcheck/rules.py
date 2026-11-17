@@ -1258,6 +1258,34 @@ _RULE_TUPLES = [
         r"private[_-]?key|passw(?:ord|d)|token|sid)(?=$|[^A-Za-z0-9_]|(?=(?-i:[A-Z])))",
         "A sensitive session/token cookie written server-side without Secure (sent in cleartext over HTTP), HttpOnly (readable by any XSS) or SameSite (CSRF-abusable) — CWE-614/CWE-1004. Set all three, matching the app's threat model: Secure over the TLS origin, HttpOnly so scripts can't read it, and SameSite=Strict/Lax (None only with Secure) on this response",
     ),
+    (
+        "R049-fixatn",
+        "security",
+        "high",
+        "Session container (re)assigned a request-derived session identifier",
+        # CWE-384: a session container indexed by a session-identifier key
+        # (session['sid'], request.session['session_id'], flask.session['sid'])
+        # or a session-object id-ish property (req.session.id / sessionID /
+        # session_id / sid) being assigned request-derived input (Python
+        # request.args/values/form/json/get_json/cookies/headers/GET/POST, Node
+        # req.query/params/body/…).  Adopting a client-supplied session id lets
+        # an attacker pre-pick the victim's session and fixate it after login.
+        # The value must be request-derived so server-generated ids (uuid4(),
+        # secrets.token_hex) stay quiet, and the key must be sid-ish so
+        # session['theme'] = request.args.get('theme') stays quiet.  The
+        # (?<![\w.]) guard stops client.session / db.session / flask_session
+        # reading as the container, and \s*=\s*(?!=) rejects == / >= / <= / !=
+        # comparisons.  Assignment via a method call (session.set/edit/update)
+        # is a different construct — stay quiet rather than guess.
+        r"(?i)(?<![\w.])"
+        r"(?:(?:req|request|flask)\s*\.\s*)?session"
+        r"(?:\[['\"](?:session(?:[_-]?id)?|sid|id[_-]?token)['\"]\]"
+        r"|\.(?:id|sessionID|session_id|sid)\b)"
+        r"\s*=\s*(?!=)"
+        r"[^\n]*?(?:request|req)\.(?:args|values|form|json|get_json|cookies|headers|query|params|body|query_string|GET|POST)"
+        r"\b",
+        "A session id being adopted from request input — the fix to prevent session fixation (CWE-384). On login, always rotate to a NEW server-generated session id: session.regenerate()/migrate() (Django/Flask) or req.session.regenerate (Node), never re-assign the id from request args/form/json/headers/cookies. Regenerating after privilege change breaks any attacker-fixated id",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

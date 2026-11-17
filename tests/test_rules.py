@@ -1749,6 +1749,53 @@ def test_cookieset_flagged_or_other_sinks_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R048-cookieset"], issues
 
 
+def test_fixatn_session_id_assigned_request_input_flagged():
+    """R049-fixatn fires when a session container indexed by a sid-ish key or
+    a session-object id property is assigned request-derived input (CWE-384)."""
+    src = (
+        "session['session_id'] = request.args.get('sid')\n"
+        "request.session['sid'] = request.form['sid']\n"
+        "req.session.id = req.query.sid\n"
+        "flask.session['session-id'] = request.values.get('session')\n"
+        "session['sid'] = request.json.get('sid')\n"
+        "req.session.sessionID = req.cookies.sid\n"
+        "session['id_token'] = request.GET.get('id_token')\n"
+        "req.session.sid = req.params.sid\n"
+        "session['sid'] = sanitize(request.args.get('sid'))\n"
+        "flask.session['sid'] = flask.request.values.get('sid')\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R049-fixatn"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_fixatn_generic_key_server_value_or_readops_stay_quiet():
+    """R049-fixatn stays quiet for generic session keys, server-generated
+    session ids, reads/pops/comparisons, method-call update paths, and
+    non-session receivers like client./db.session (client may legitimately
+    adopt a provider session id)."""
+    src = (
+        "session['theme'] = request.args.get('theme')\n"
+        "session['sid'] = secrets.token_hex(16)\n"
+        "session['sid'] = uuid4().hex\n"
+        "session.pop('sid')\n"
+        "payload = session['sid']\n"
+        "session['sid'] == prev\n"
+        "request.session['sid'] == request.args.get('sid')\n"
+        "request.session.update(locale=request.args.get('locale'))\n"
+        "client.session['sid'] = req.args.get('x')\n"
+        "db.session['sid'] = raw\n"
+        "req.session.destroy()\n"
+        "sessionvalidate('sid', request.args.get('sid'))\n"
+        "request.session['token'] = request.headers.get('X-Session')\n"
+        "request.session['session_id'] = uuid4().hex\n"
+        "if request.session['sid'] == stored:\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R049-fixatn"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1922,6 +1969,7 @@ def test_every_rule_has_test_exposure():
         "R046-evaljs",
         "R047-postmsg-recv",
         "R048-cookieset",
+        "R049-fixatn",
     }
     assert exposed <= rids
     uncovered = rids - exposed

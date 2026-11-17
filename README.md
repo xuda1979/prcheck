@@ -240,7 +240,13 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   server-side session/token cookies written without
   Secure/HttpOnly/SameSite flags (`response.set_cookie`/`res.cookie` calls
   naming a session/token/credential key with none of the three hardening
-  flags on the line — CWE-614/CWE-1004).
+  flags on the line — CWE-614/CWE-1004), session containers
+  (re)assigned a request-derived session identifier (a session dict/session
+  object indexed by a sid/`session_id`/`id_token` key or the `req.session.id`
+  property adopted from `request.*`/`req.*` input — CWE-384, adopting a
+  client-supplied id pre-picks the victim's session and fixates it after
+  login; server-generated ids and generic keys like `session['theme']` stay
+  quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
