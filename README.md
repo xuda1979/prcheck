@@ -264,7 +264,14 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   allowlist, rate limit, auth, scheme or URL decision — CWE-807 / CWE-348:
   clients forge the value to bypass IP-based access control, downgrade HTTPS
   checks, or poison generated URLs; log lines, plain reads into generic
-  variables and display-only uses stay quiet).
+  variables and display-only uses stay quiet), Java OS command execution
+  (`Runtime.getRuntime().exec(...)` / `ProcessBuilder(...)` constructions fed
+  a non-literal command — a request parameter, `@RequestBody`-derived
+  variable, argv, env lookup or a `+`-concatenated string: Java always forwards
+  the exec argument to the shell (`/bin/sh -c`), so command separators execute
+  attacker code — CWE-78; all-literal commands, ProcessBuilder config-only
+  calls and regex `.exec(...)` stay quiet, and Node `child_process.exec` /
+  Python `subprocess` remain owned by R032/R012).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

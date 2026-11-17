@@ -1953,6 +1953,65 @@ def test_hdritrust_logs_plain_reads_and_non_header_sources_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R052-hdritrust"], issues
 
 
+def test_javaexec_os_command_from_request_or_variable_flagged():
+    """R053-javaexec fires when Runtime.getRuntime().exec(...) or a
+    ProcessBuilder construction is fed a non-literal argument — a request
+    parameter, request header, @RequestBody-derived variable, argv, env lookup
+    or string concatenation with a variable (Java always runs exec through the
+    shell — CWE-78)."""
+    src = (
+        'Runtime.getRuntime().exec(request.getParameter("cmd"));\n'
+        "Runtime.getRuntime().exec(cmd);\n"
+        'Runtime.getRuntime().exec("ping " + request.getHeader("Host"));\n'
+        'Runtime.getRuntime().exec("cmd /c " + command);\n'
+        'Runtime.getRuntime().exec(new String[]{"sh", "-c", command});\n'
+        'ProcessBuilder pb = new ProcessBuilder(request.getParameter("cmd"));\n'
+        "ProcessBuilder pb = new ProcessBuilder(cmd);\n"
+        'new ProcessBuilder("sh", "-c", cmd).start();\n'
+        'new ProcessBuilder("/bin/sh", "-c", userInput).start();\n'
+        'new ProcessBuilder(cmd).directory(new File("/tmp")).start();\n'
+        'new ProcessBuilder("ls", "-la", "\"" + file + "\"").start();\n'
+        "Runtime.getRuntime().exec(args[0]);\n"
+        'Runtime.getRuntime().exec(env.get("SHELL_CMD"));\n'
+        'Runtime.getRuntime().exec("sh -c " + req.getParameter("x"));\n'
+        "new ProcessBuilder(Arrays.asList(command));\n"
+        "ProcessBuilder pb = new ProcessBuilder(userCmd); pb.start();\n"
+        "Runtime.getRuntime().exec(payload);\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R053-javaexec"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaexec_static_literals_other_sinks_stay_quiet():
+    """R053-javaexec stays quiet for all-literal commands, ProcessBuilder
+    config-only calls, regex .exec(), and shells owned by other rules — no
+    non-literal argument feeds the Java exec sink."""
+    src = (
+        'Runtime.getRuntime().exec("ls -la /tmp");\n'
+        'Runtime.getRuntime().exec("echo hello");\n'
+        'new ProcessBuilder("ls", "-la").start();\n'
+        'new ProcessBuilder("java", "-version");\n'
+        "pb.redirectErrorStream(true);\n"
+        'ProcessBuilder pb = new ProcessBuilder("python", "script.py");\n'
+        "String m = pattern.exec(input).group(1);\n"
+        "executor.execute(command);\n"
+        "Runtime rt = Runtime.getRuntime();\n"
+        'new ProcessBuilder(new String[]{"sh", "-c", "echo hi"}).start();\n'
+        'new ProcessBuilder("sh", "-c", "/bin/echo hi").start();\n'
+        'if (cmd != null) { Runtime.getRuntime().exec("ls"); }\n'
+        "child_process.exec(command);\n"
+        'subprocess.run(["ls", "-la"])\n'
+        'logger.info("running " + cmd);\n'
+        "void exec(String cmd) { return; }\n"
+        "ProcessBuilder pb; pb = new ProcessBuilder();\n"
+        'pb.command("ls", "-la");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R053-javaexec"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2130,6 +2189,7 @@ def test_every_rule_has_test_exposure():
         "R050-dynimp",
         "R051-hostpois",
         "R052-hdritrust",
+        "R053-javaexec",
     }
     assert exposed <= rids
     uncovered = rids - exposed

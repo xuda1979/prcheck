@@ -1371,6 +1371,33 @@ _RULE_TUPLES = [
         r"|\bredirect\s*\(|\bhttps?://|(?:==|!=)\s*['\"]https['\"]))",
         "An IP allowlist, rate-limit, authorization, scheme or URL decision that trusts a client-spoofable proxy header — CWE-807 / CWE-348. X-Forwarded-For / X-Real-IP / X-Client-IP / CF-Connecting-IP / True-Client-IP / X-Forwarded-Host / X-Forwarded-Proto(-col) / X-Scheme / X-Forwarded-Url / X-Original-URL / X-Rewrite-URL / Forwarded are written by the caller unless your reverse proxy strips them, so reading one for authentication, an IP allowlist, rate limiting or scheme handling lets clients forge the value: bypass IP-based access control, downgrade HTTPS checks, or poison generated absolute URLs. Strip request-supplied proxy headers on the trusted edge, then use the proxy-reported peer address (request.remote_addr / socket peer or PROXY protocol v2) and the internally-known scheme",
     ),
+    (
+        "R053-javaexec",
+        "security",
+        "high",
+        "OS command executed via Java Runtime.exec / ProcessBuilder from non-literal input",
+        # CWE-78 (Improper Neutralization of Special Elements in an OS Command):
+        # the Java runtime always passes the exec argument to the shell, so an
+        # argument built from request input, a variable, or string concatenation
+        # lets the attacker inject command separators and run arbitrary OS
+        # commands.  Catches Runtime.getRuntime().exec() and ProcessBuilder
+        # construction where the command or an argument is a bare identifier
+        # (request parameter, @RequestBody body, argv, env lookup, any variable
+        # that could carry user data) or a string-literal concatenated with '+'
+        # a variable.  Static all-literal commands, ProcessBuilder config-only
+        # calls (redirectErrorStream / directory / command() alone), regex
+        # pattern.exec(...), Node child_process.exec (R032 owns Node) and
+        # Python subprocess (R012 owns Python) all lack the shell-driven Java
+        # sink shape and stay quiet.  Java sources are case-sensitive
+        # CamelCase, so no inline flag is used.  Single-line contract.
+        r"(?:\bRuntime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\(\s*(?!new\b)[A-Za-z_]\w*[^)\n]*\)"
+        r"|\bRuntime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\([^)\n]*,\s*(?!new\b)[A-Za-z_]\w*[^)\n]*\)"
+        r"|\bRuntime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\([^)\n]*['\"]\s*\+\s*[A-Za-z_]\w*[^)\n]*\)"
+        r"|\bProcessBuilder\s*\(\s*(?!new\b)[A-Za-z_]\w*[^)\n]*\)"
+        r"|\bProcessBuilder\s*\([^)\n]*,\s*(?!new\b)[A-Za-z_]\w*[^)\n]*\)"
+        r"|\bProcessBuilder\s*\([^)\n]*['\"]\s*\+\s*[A-Za-z_]\w*[^)\n]*\))",
+        "Java Runtime.getRuntime().exec(...) / ProcessBuilder fed a non-literal command or argument — CWE-78 OS command injection. The Java runtime forwards the exec parameter to the shell (/bin/sh -c), so command separators in request.input, a request parameter, an @RequestBody body, env lookup, argv or a concatenated variable execute attacker code. Validate the command against an allow-list at the boundary, prefer exec-array executors that bypass the shell, and never interpolate request data into a shell string",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
