@@ -230,7 +230,10 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   `document.cookie` writes of security values (tokens/sessions/credentials
   written via `=`/`+=` — such cookies can never be httpOnly, so XSS reads the
   bearer material straight off the cookie object, vs. server-side httpOnly
-  cookies).
+  cookies), JS dynamic code execution from strings (`new Function`/`Function()`
+  constructors including `window`/`globalThis`/`global` dotted forms, and
+  `setTimeout`/`setInterval` with a string — not a callback — first
+  argument, the same primitive as `eval`, CWE-95).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

@@ -1176,6 +1176,30 @@ _RULE_TUPLES = [
         r")",
         "Security values written to document.cookie can never be httpOnly — any XSS reads them straight off the cookie object, and the value mirrors any URL-derivable cookie your server could have scoped instead (CWE-922). Keep tokens in an httpOnly, Secure, SameSite cookie set server-side and never touch document.cookie for bearer material",
     ),
+    (
+        "R046-evaljs",
+        "security",
+        "medium",
+        "Dynamic code execution from string (new Function / Function / string setTimeout|setInterval)",
+        # JavaScript string-code execution (CWE-95-ish): R004 covers Python
+        # eval()/exec(); nothing yet flags the JS family.  new Function(p) and
+        # Function(p) compile and run a string as code — on a modern page that's
+        # the same blast radius as eval, and it defeats any CSP that blocks
+        # 'unsafe-eval' via a different syntax.  window.Function /
+        # globalThis.Function / global.Function are the same sink.
+        # setTimeout/setInterval with a *string* first argument (not a
+        # callback/closure — those stay quiet) also eval the string.
+        # Case-sensitive (the machine-code source is JS, and lower-case
+        # `function` declarations / IIFEs must stay quiet), so no (?i) flag;
+        # new FunctionString / myFunction / foo.Function /
+        # Function.prototype.bind(x) / parser.setFunction(!) can't match.
+        r"(?:"
+        r"(?<![\w$.])Function\s*\("
+        r"|(?:window|globalThis|global)\s*\.\s*Function\s*\("
+        r"|\bset(?:Timeout|Interval)\s*\(\s*[\"'`]"
+        r")",
+        "Functions built from string source on the client are code fed to the JS engine — the same primitive as eval (CWE-95): if any part of the source reaches user/request input, that's arbitrary script execution. Prefer borrowable callbacks or modules, and keep CSP strict rather than letting a string-body Function be the fallible seam",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

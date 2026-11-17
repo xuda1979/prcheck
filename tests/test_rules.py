@@ -1608,6 +1608,54 @@ def test_cookie_generic_compare_or_read_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R045-cookie"], issues
 
 
+def test_evaljs_dynamic_code_flagged():
+    """R046-evaljs flags JS dynamic code execution from strings — new
+    Function / Function() constructors (incl. window/globalThis/global
+    dotted forms) and setTimeout/setInterval with a string first
+    argument (CWE-95)."""
+    src = (
+        "new Function('return this')();\n"
+        "const fn = Function('return config.secret');\n"
+        "window.Function('alert(1)')();\n"
+        "globalThis.Function(payload)();\n"
+        "setTimeout('tick(' + n + ')', 100);\n"
+        'setInterval("check();", 1000);\n'
+        "const t = setTimeout(`poll(${q})`, 0);\n"
+        "fn = new Function(a, b, body);\n"
+        "window.setTimeout('boom()', 50);\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R046-evaljs"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), (
+        f"R046-evaljs mismatch: {hits}"
+    )
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_evaljs_callbacks_and_lowercase_functions_stay_quiet():
+    """R046-evaljs stays quiet for callback/closure forms, lowercase
+    `function` keywords, and non-sink identifiers (FunctionString,
+    myFunction, foo.Function, Function.prototype, parser.setFunction,
+    window.setTimeout with a callback)."""
+    src = (
+        "new FunctionString(code);\n"
+        "myFunction(callback);\n"
+        "setTimeout(callback, 100);\n"
+        "setTimeout(() => cleanup(), 0);\n"
+        "setInterval(() => {}, 1000);\n"
+        "(function() { seed(); })();\n"
+        "function helper() { return 1; }\n"
+        "x = foo.Function;\n"
+        "const res = Function.prototype.bind(x);\n"
+        "eval(request_data);\n"
+        "obj.Eval(data);\n"
+        "parser.setFunction(d);\n"
+        "const t = window.setTimeout(done, 200);\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R046-evaljs"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1778,6 +1826,7 @@ def test_every_rule_has_test_exposure():
         "R034-redos", "R035-hdrinj", "R036-loginj", "R037-credurl",
         "R038-perm", "R039-nav", "R040-tabnab", "R041-postmsg",
         "R042-websock", "R043-math-random", "R044-storage", "R045-cookie",
+        "R046-evaljs",
     }
     assert exposed <= rids
     uncovered = rids - exposed
