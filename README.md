@@ -341,7 +341,20 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   ALL_CAPS concat operands, in-string arithmetic, XPath construction /
   variable-resolution without a sink call, DOM traversal
   (`getElementsByTagName`), staged `By.xpath` objects and non-XPath
-  receiver names stay quiet).
+  receiver names stay quiet), Java URL redirect / open redirect
+  (`HttpServletResponse.sendRedirect(...)`, `response.setHeader("Location",
+  ...)`, Spring `RedirectView` / `redirectView.setUrl(...)` and
+  `ModelAndView("redirect:" + ...)` views fed a `'...' + lowercaseIdentifier`
+  literal-concatenated URL, a `request.*` accessor
+  (`getParameter`/`getHeader`/`getRequestURI`/`getRequestURL`/
+  `getQueryString`), an unbounded sink-context bare identifier
+  (`dest`/`target`/`nextUrl`/`callbackUrl`...), or a builder/`.toString()`
+  chain — the response 3xx's to an attacker-chosen host, laundering phishing
+  links past URL scanners — CWE-601; fully-literal URLs, SCREAMING_SNAKE
+  constants, bare String variables, ALL_CAPS concat operands, status-only
+  responses (`setStatus`/`sendError`), dispatcher forwards
+  (`getRequestDispatcher`), `request.getContextPath()` concat and
+  non-redirect headers (`Cache-Control`) stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

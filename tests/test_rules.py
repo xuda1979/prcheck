@@ -2400,6 +2400,68 @@ def test_xpathjava_literal_constant_or_non_sink_targets_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R059-xpathjava"], issues
 
 
+def test_openredir_concat_or_request_derived_redirect_flagged():
+    """R060-openredir fires when a Java redirect sink — HttpServletResponse
+    .sendRedirect, response.setHeader("Location", ...), Spring RedirectView /
+    redirectView.setUrl, or ModelAndView "redirect:" views — is fed a
+    concatenated, request-derived, unbounded bare-identifier or builder-chain
+    URL (CWE-601: the response 3xx's to an attacker-chosen host)."""
+    src = (
+        'response.sendRedirect("/login?to=" + returnTo);\n'
+        'response.sendRedirect(request.getParameter("next"));\n'
+        'resp.sendRedirect(req.getHeader("Referer"));\n'
+        'response.sendRedirect("/next?u=" + userId);\n'
+        'response.sendRedirect(sb.toString());\n'
+        'response.setHeader("Location", request.getParameter("goto"));\n'
+        'response.setHeader("Location", "/next?u=" + userId);\n'
+        'RedirectView view = new RedirectView("http://go/?r=" + ref);\n'
+        'RedirectView v = new RedirectView(request.getParameter("dest"));\n'
+        'redirectView.setUrl(request.getParameter("to"));\n'
+        'response.sendRedirect(request.getRequestURL().toString());\n'
+        'redirectView.setUrl("/go/?t=" + token);\n'
+        'return new ModelAndView("redirect:" + dest);\n'
+        'return new ModelAndView("redirect:/" + path);\n'
+        'response.sendRedirect(nextUrl);\n'
+        'res.sendRedirect(target);\n'
+        'httpResponse.sendRedirect("/login?cb=" + callbackUrl);\n'
+        'response.sendRedirect(request.getRequestURI());\n'
+        'resp.sendRedirect(builder.build());\n'
+        'return new ModelAndView("redirect:https://go/?u=" + encoded);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R060-openredir"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_openredir_literal_constant_or_non_redirect_targets_stay_quiet():
+    """R060-openredir stays quiet for fully literal redirect URLs,
+    SCREAMING_SNAKE constants, bare String variables, ALL_CAPS concat
+    operands, status-only responses, dispatcher forwards, non-redirect
+    headers and attribute plumbing — no fused redirect sink receives
+    string-built input."""
+    src = (
+        'response.sendRedirect("/home");\n'
+        'response.sendRedirect(HOME_URL);\n'
+        'response.setHeader("Location", "/login");\n'
+        'RedirectView view = new RedirectView("/done");\n'
+        'return new ModelAndView("redirect:/home");\n'
+        'response.setStatus(302);\n'
+        'String s = request.getParameter("u");\n'
+        'request.getRequestDispatcher("/home").forward(request, response);\n'
+        'response.sendError(404);\n'
+        'response.sendRedirect("/go" + SUFFIX);\n'
+        'response.sendRedirect(request.getContextPath() + "/home");\n'
+        'RedirectView v = new RedirectView(url);\n'
+        'return new ModelAndView("user/" + uid + ".jsp");\n'
+        'response.setHeader("Cache-Control", "no-cache");\n'
+        'model.addAttribute("url", request.getParameter("u"));\n'
+        'response.sendRedirect(null);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R060-openredir"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2584,6 +2646,7 @@ def test_every_rule_has_test_exposure():
         "R057-ssrf",
         "R058-jdbcsqli",
         "R059-xpathjava",
+        "R060-openredir",
     }
     assert exposed <= rids
     uncovered = rids - exposed

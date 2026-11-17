@@ -1641,6 +1641,43 @@ _RULE_TUPLES = [
         r")",
         "A Java XPath sink fed a concatenated or request-derived expression — CWE-643 XPath injection. XPathFactory.newInstance().newXPath().evaluate/compile, xpath/xp-named receivers and DOM4J document.selectNodes/selectSingleNode compile the query and run it against the parsed document: a predicate built with '+' concatenation or sb.toString() lets an attacker inject boolean tautologies (' or '1'='1) or wildcard child selects to read sibling/root nodes the app did not authorize. Build XPath predicates only from validated static fragments and parameterize/bind variables; whitelist the expression shape and never concatenate request input into the query string",
     ),
+    (
+        "R060-openredir",
+        "security",
+        "high",
+        "Java URL redirect / Location header built from client-controlled input",
+        # CWE-601 (URL Redirection to Untrusted Site): HttpServletResponse
+        # .sendRedirect, setHeader("Location", ...), Spring RedirectView /
+        # redirectView.setUrl and ModelAndView "redirect:" views issue an
+        # HTTP 3xx to a URL the client then follows.  When the target is
+        # assembled with '+' concatenation of a lowercase identifier
+        # (parameter value, DTO field, builder variable) or is an unbounded
+        # sink-context bare identifier (dest/target/nextUrl...), or passed
+        # a request accessor result (request.getParameter/getHeader/
+        # getRequestURI/getRequestURL/getQueryString), an attacker can steer
+        # the redirect to an attacker-controlled host — classic open-redirect
+        # used to launder phishing links past URL scanners.  Fully-literal
+        # strings, SCREAMING_SNAKE constants, bare String variables, ALL_CAPS
+        # concat operands ("/go" + SUFFIX), status-only calls (setStatus,
+        # sendError), dispatcher forwards and non-redirect headers
+        # (Cache-Control) stay quiet.  Java sources are case-sensitive
+        # CamelCase, so no inline flag (same convention as R053-R059).
+        # Single-line contract.
+        r"(?:"
+        r"\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*sendRedirect\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*sendRedirect\s*\(\s*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getRequestURI|getRequestURL|getQueryString)\s*\("
+        r"|\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*sendRedirect\s*\(\s*\b(?:next|dest|target|returnTo|returnUrl|redirectTo|callback|goTo|lastPage|url)\w*\s*\)"
+        r"|\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*sendRedirect\s*\(\s*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\("
+        r"|\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*setHeader\s*\(\s*['\"]Location['\"]\s*,\s*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getRequestURI|getRequestURL|getQueryString)\s*\("
+        r"|\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*setHeader\s*\(\s*['\"]Location['\"]\s*,\s*[^,\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\bnew\s+RedirectView\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|\bnew\s+RedirectView\s*\(\s*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getRequestURI|getQueryString)\s*\("
+        r"|\b(?:redirectView)\s*\.\s*setUrl\s*\(\s*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString)\s*\("
+        r"|\b(?:redirectView)\s*\.\s*setUrl\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\bnew\s+ModelAndView\s*\(\s*['\"]redirect:[^'\"]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r")",
+        "A Java redirect sink fed a concatenated or request-derived URL — CWE-601 open redirect. HttpServletResponse.sendRedirect, response.setHeader(\"Location\", ...), Spring RedirectView / redirectView.setUrl and ModelAndView \"redirect:\" views send the browser to the target: server-side concatenation of a parameter/field value, an unbounded sink-context bare identifier (dest/target/nextUrl), a request accessor result (getParameter/getHeader/getRequestURI) or a builder/.toString() chain lets an attacker pick where victims land after login/logout — used to launder phishing links past scanners. Validate that the target is a same-origin relative path (starts with '/') or an allow-listed scheme+host before redirecting; never reflect request input into the Location",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
