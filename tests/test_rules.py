@@ -2526,6 +2526,72 @@ def test_ldapjndi_literal_constant_or_non_search_targets_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R061-ldapjndi"], issues
 
 
+def test_javaxxe_request_derived_or_string_built_parse_flagged():
+    """R062-javaxxe fires when a Java XML parser — JAXP
+    DocumentBuilderFactory/SAXParserFactory chains, builder/documentBuilder/
+    saxParser/reader/xmlReader receivers or DOM4J `new SAXReader().read(...)` —
+    is fed request input, an upload stream, a concatenated string, a
+    builder/.toString() chain or an xml-named variable without entity-
+    expansion hardening (CWE-611: crafted DOCTYPE external entities read
+    local files / hit internal URLs)."""
+    src = (
+        'DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(request.getInputStream());\n'
+        'SAXParserFactory.newInstance().newSAXParser().parse(request.getInputStream(), handler);\n'
+        'builder.parse(request.getInputStream());\n'
+        'documentBuilder.parse(req.getReader());\n'
+        'saxParser.parse(part.getInputStream());\n'
+        'xmlReader.parse(new InputSource(request.getReader()));\n'
+        'saxReader.read(part.getInputStream());\n'
+        'new SAXReader().read(request.getInputStream());\n'
+        'new SAXReader().read(fileItem.getInputStream());\n'
+        'builder.parse("<?xml version=\\"1.0\\"?>" + payload);\n'
+        'parser.parse("<root>" + userXml);\n'
+        'reader.parse(sb.toString());\n'
+        'builder.parse(stringBuilder.append("<doc>").append(content).toString());\n'
+        'documentBuilder.parse(request.getParameter("docUrl"));\n'
+        'saxReader.read(xmlBody);\n'
+        'new SAXReader().read("<resp>" + data);\n'
+        'DocumentBuilderFactory.newInstance().newDocumentBuilder().parse("<a>" + content);\n'
+        'parser.parse(new InputSource(req.getInputStream()));\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R062-javaxxe"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaxxe_hardened_literal_or_non_parse_targets_stay_quiet():
+    """R062-javaxxe stays quiet for factory construction / hardening
+    (setFeature/setProperty, disallow-doctype-decl), literal or constant
+    sources, ALL_CAPS concat operands, node-model building, validation,
+    transformers/serializers, streaming char reads and non-parse streams —
+    no unhardened XML sink parses client-controlled input."""
+    src = (
+        'DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();\n'
+        'DocumentBuilderFactory.newInstance().newDocumentBuilder();\n'
+        'builder.parse("config.xml");\n'
+        'builder.parse(XML_PATH);\n'
+        'builder.parse(is);\n'
+        'saxParser.parse(entity.getInputStream());\n'
+        'SAXReader reader = new SAXReader();\n'
+        'factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);\n'
+        'builder.setExpandEntityReferences(false);\n'
+        'saxParser.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");\n'
+        'xmlReader.setFeature("http://xml.org/sax/features/external-general-entities", false);\n'
+        'reader.read(new InputSource(new FileInputStream(f)));\n'
+        'builder.parse(new InputSource(XML_PATH));\n'
+        'transformer.transform(xmlSource, result);\n'
+        'Document doc = builder.newDocument();\n'
+        'schema.newValidator().validate(new StreamSource(xmlContent));\n'
+        'builder.parse(STATIC_DOC + SUFFIX);\n'
+        'saxReader.read(new CharArrayReader(chars));\n'
+        'BufferedReader reader = new BufferedReader(in); reader.read(buffer, 0, len);\n'
+        'parser.parse(attachments.getInputStream());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R062-javaxxe"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2712,6 +2778,7 @@ def test_every_rule_has_test_exposure():
         "R059-xpathjava",
         "R060-openredir",
         "R061-ldapjndi",
+        "R062-javaxxe",
     }
     assert exposed <= rids
     uncovered = rids - exposed

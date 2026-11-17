@@ -1709,6 +1709,51 @@ _RULE_TUPLES = [
         r")",
         "A Java LDAP / Spring LDAP search fed a concatenated or request-derived filter or base — CWE-90 LDAP injection. JNDI DirContext-family ctx/dirContext/ldapContext/initialDirContext .search and Spring LdapTemplate.search/searchForObject/searchForContext send the (base, filter) pair to the server: request input concatenated with '+' or a builder/.toString() chain crosses into the filter expression, so an attacker can inject ')(objectClass=*)' tautologies or '(uid=*)' wildcards to bypass auth or read sibling entries — LDAP treats the filter as an AND of expression terms and never encodes it. Escape / filter special characters (\\ * ( ) NUL) and use whitelisted attribute values or Spring's FilterCriteraBuilder/EqualsFilter for every user-derived term; never concatenate request input into the filter or base dn",
     ),
+    (
+        "R062-javaxxe",
+        "security",
+        "high",
+        "Java XML parser fed client-controlled or concatenated input (XXE / entity expansion risk)",
+        # CWE-611 (Improper Restriction of XML External Entity Reference):
+        # JAXP DocumentBuilderFactory/SAXParserFactory chains — both the
+        # inline DocumentBuilderFactory.newInstance().newDocumentBuilder()
+        # and the staged form (a lowercase factory variable split across a
+        # preceding line, e.g. factory.newDocumentBuilder().parse(...)) — and
+        # DOM4J SAXReader (builder/documentBuilder/saxParser/reader/
+        # xmlReader/saxReader receivers and `new SAXReader().read(...)`) are
+        # compiled without hardening (disallow-doctype-decl absent), so they
+        # expand external entities when the parsed document is
+        # attacker-controlled.  A request accessor result
+        # (getInputStream/getReader/getParameter/getPart/getHeader), an
+        # upload stream (fileItem/part/upload/multipartFile.getInputStream),
+        # a '+' concatenation of a lowercase identifier, a builder/.toString()
+        # chain or an xml-named bare variable (xmlBody/userXml/payload) fed to
+        # parse/read means the document tree (and any entity it references)
+        # comes from the client, enabling local-file disclosure /
+        # internal-network SSRF via crafted DOCTYPEs.  Factory
+        # construction/setup lines (setFeature/setProperty hardening,
+        # disallow-doctype-decl), nodeModel-building (builder.newDocument()),
+        # validation, transformers/serializers, streaming char reads and
+        # non-parse streams of upload entities stay quiet.  Java sources are
+        # case-sensitive CamelCase, so no inline flag (same convention as
+        # R053-R061).  Single-line contract.
+        r"(?:"
+        r"(?:[A-Z]\w*\s*\.\s*newInstance\s*\(\s*\)\s*\.\s*|[a-z_]\w*\s*\.\s*)(?:newDocumentBuilder|newSAXParser)\s*\(\s*\)\s*\.\s*parse\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getInputStream|getReader|getParameter|getPart|getHeader)\s*\("
+        r"|(?:[A-Z]\w*\s*\.\s*newInstance\s*\(\s*\)\s*\.\s*|[a-z_]\w*\s*\.\s*)(?:newDocumentBuilder|newSAXParser)\s*\(\s*\)\s*\.\s*parse\s*\([^;\n]*(?:fileItem|part|upload|multipartFile)\w*\s*\.\s*getInputStream\s*\("
+        r"|\b(?:builder|docBuilder|documentBuilder|parser|saxParser|reader|xmlReader|saxReader)\w*\s*\.\s*(?:parse|read)\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getInputStream|getReader|getParameter|getPart|getHeader)\s*\("
+        r"|\b(?:builder|docBuilder|documentBuilder|parser|saxParser|reader|xmlReader|saxReader)\w*\s*\.\s*(?:parse|read)\s*\([^;\n]*(?:fileItem|part|upload|multipartFile)\w*\s*\.\s*getInputStream\s*\("
+        r"|\bnew\s+SAXReader\s*\(\s*\)\s*\.\s*read\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getInputStream|getReader|getParameter|getPart|getHeader)\s*\("
+        r"|\bnew\s+SAXReader\s*\(\s*\)\s*\.\s*read\s*\([^;\n]*(?:fileItem|part|upload|multipartFile)\w*\s*\.\s*getInputStream\s*\("
+        r"|\b(?:builder|docBuilder|documentBuilder|parser|saxParser|reader|xmlReader|saxReader)\w*\s*\.\s*(?:parse|read)\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\b(?:builder|docBuilder|documentBuilder|parser|saxParser|reader|xmlReader|saxReader)\w*\s*\.\s*(?:parse|read)\s*\([^;\n]*[a-z_]\w*\s*\.\s*(?:append|build|toString)\s*\("
+        r"|\b(?:builder|docBuilder|documentBuilder|parser|saxParser|reader|xmlReader|saxReader)\w*\s*\.\s*(?:parse|read)\s*\(\s*(?!['\"])(?=[\w.]*[a-z])(?:[\w.]*?)?(?-i:xml)[\w.\[\]]*(?:\s*,|\s*\))"
+        r"|(?:[A-Z]\w*\s*\.\s*newInstance\s*\(\s*\)\s*\.\s*|[a-z_]\w*\s*\.\s*)(?:newDocumentBuilder|newSAXParser)\s*\(\s*\)\s*\.\s*parse\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\bnew\s+SAXReader\s*\(\s*\)\s*\.\s*read\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|(?:[A-Z]\w*\s*\.\s*newInstance\s*\(\s*\)\s*\.\s*|[a-z_]\w*\s*\.\s*)(?:newDocumentBuilder|newSAXParser)\s*\(\s*\)\s*\.\s*parse\s*\([^;\n]*[a-z_]\w*\s*\.\s*(?:append|build|toString)\s*\("
+        r"|\bnew\s+SAXReader\s*\(\s*\)\s*\.\s*read\s*\([^;\n]*[a-z_]\w*\s*\.\s*(?:append|build|toString)\s*\("
+        r")",
+        "A Java XML parser fed client-controlled input without entity-expansion hardening — CWE-611 XXE. JAXP DocumentBuilderFactory/SAXParserFactory newInstance chains (.parse) and DOM4J SAXReader (.read), plus builder/documentBuilder/saxParser/reader/xmlReader receivers, parse a document assembled from a request accessor (getInputStream/getReader/getParameter/getPart/getHeader), an upload file stream, a '+' concatenation, a builder/.toString() chain or an xml-named variable: a crafted DOCTYPE with an external entity SYSTEM reference makes the parser read files (/etc/passwd) or hit internal URLs, and billion-laughs nested entities exhaust memory. Harden the factory (disallow-doctype-decl, external DTD/entity features off), validate the source against a whitelist or a schema-less in-memory safe parser, and refuse non-well-formed client documents",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

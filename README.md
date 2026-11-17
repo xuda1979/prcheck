@@ -366,7 +366,21 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   constants, bare String variables, ALL_CAPS concat operands, in-string
   arithmetic, non-search LDAP ops (`authenticate`/`createSubcontext`/
   `close`/`lookup`) and non-LDAP receivers (`table.search`, `query.search`,
-  `re.search`) stay quiet).
+  `re.search`) stay quiet), Java XXE
+  (`DocumentBuilderFactory`/`SAXParserFactory` `newInstance()` chains and
+  DOM4J `SAXReader` — `builder`/`documentBuilder`/`saxParser`/`reader`/
+  `xmlReader`/`saxReader` receivers plus `new SAXReader().read(...)` —
+  fed a `request.*` accessor (`getInputStream`/`getReader`/`getParameter`/
+  `getPart`/`getHeader`), an upload stream (`fileItem`/`part`/`upload`/
+  `multipartFile.getInputStream`), a `'...' + lowercaseIdentifier` concat, a
+  builder/`.toString()` chain or an xml-named variable such as `xmlBody`/
+  `userXml`/`payload` without entity-expansion hardening — a crafted DOCTYPE
+  external entity reads local files / hits internal URLs — CWE-611; factory
+  construction and hardening (`setFeature`/`setProperty`,
+  `disallow-doctype-decl`), fully-literal or constant sources, ALL_CAPS
+  concat operands, node-model building (`builder.newDocument()`), validation,
+  transformers/serializers, streaming char reads and non-parse streams stay
+  quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
