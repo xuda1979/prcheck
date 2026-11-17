@@ -256,7 +256,15 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   fed to a redirect(...) call, an http/https literal build, or a
   URL/reset/callback-link assignment — CWE-644 Host Header Attack: open
   redirect, poisoned emailed-reset links, and Vary-less cache poisoning;
-  allowed-host guards, comparisons, log lines and plain reads stay quiet).
+  allowed-host guards, comparisons, log lines and plain reads stay quiet),
+  security decisions built on a client-spoofable proxy/forwarded header
+  (X-Forwarded-For / X-Real-IP / X-Client-IP / CF-Connecting-IP /
+  True-Client-IP / X-Forwarded-Host / X-Forwarded-Proto(-col) / X-Scheme /
+  X-Forwarded-Url / X-Original-URL / X-Rewrite-URL / Forwarded fed to an IP
+  allowlist, rate limit, auth, scheme or URL decision — CWE-807 / CWE-348:
+  clients forge the value to bypass IP-based access control, downgrade HTTPS
+  checks, or poison generated URLs; log lines, plain reads into generic
+  variables and display-only uses stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

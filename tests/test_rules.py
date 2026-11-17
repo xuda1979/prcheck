@@ -1897,6 +1897,62 @@ def test_hostpois_guards_reads_or_static_targets_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R051-hostpois"], issues
 
 
+def test_hdritrust_spoofable_header_security_decision_flagged():
+    """R052-hdritrust fires when a client-spoofable proxy/forwarded header
+    (X-Forwarded-For / X-Real-IP / CF-Connecting-IP / X-Forwarded-Proto /
+    X-Original-URL / Forwarded) feeds an in-line identity, scheme or URL
+    decision — IP allowlist, rate limit, auth, https check, redirect (CWE-807)."""
+    src = (
+        "ip = request.headers.get('X-Forwarded-For')\n"
+        "client_ip = request.headers.get('X-Real-IP')\n"
+        "user_ip = req.headers['x-forwarded-for'].split(',')[0].strip()\n"
+        "addr = request.headers.get('CF-Connecting-IP')\n"
+        "remote = req.headers.get('Forwarded')\n"
+        "if request.headers.get('X-Forwarded-For') not in ALLOWED_IPS: abort(403)\n"
+        "if req.headers.get('x-forwarded-for') in INTERNAL_NETS: grant_admin()\n"
+        "if request.headers.get('X-Forwarded-For') in BLOCKED_NETS: deny()\n"
+        "rate_limit(request.headers.get('X-Forwarded-For'))\n"
+        "request.environ['REMOTE_ADDR'] = request.headers.get('X-Forwarded-For')\n"
+        "scheme = request.headers.get('X-Forwarded-Proto')\n"
+        "is_secure = request.headers.get('X-Forwarded-Proto') == 'https'\n"
+        "if request.headers.get('x-forwarded-proto') == 'https': secure_cookie(...)\n"
+        "if request.headers.get('X-Forwarded-Proto') != 'https': return redirect('http://...')\n"
+        "path = request.headers.get('X-Original-URL') or request.headers.get('X-Rewrite-URL')\n"
+        "return redirect('https://' + request.headers.get('X-Forwarded-Host'))\n"
+        "target = 'https://' + request.headers.get('X-Forwarded-Host') + '/cb'\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R052-hdritrust"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_hdritrust_logs_plain_reads_and_non_header_sources_stay_quiet():
+    """R052-hdritrust stays quiet for log lines, analytics reads, display-only
+    uses, generic variable buffering, non-spoofable peer sources, and headers
+    that are not in the trusted-proxy set — no in-line decision signal."""
+    src = (
+        "logger.info('xff %s', request.headers.get('X-Forwarded-For'))\n"
+        "xff = request.headers.get('X-Forwarded-For')  # analytics\n"
+        "return render_template('x.html', ip=request.headers.get('X-Forwarded-For'))\n"
+        "return render_template('x.html', client=request.headers.get('X-Forwarded-For'))\n"
+        "proxy = request.headers.get('X-Forwarded-For', request.remote_addr)\n"
+        "headers = request.headers.get('X-Forwarded-Proto') or 'http'\n"
+        "app.run(host='0.0.0.0')\n"
+        "trusted_proxies = ['127.0.0.1']\n"
+        "ip = request.remote_addr\n"
+        "user = request.args.get('u')\n"
+        "scheme = 'https' if request.is_secure else 'http'\n"
+        "r.headers.get('User-Agent')\n"
+        "host = request.headers.get('Host') or request.host\n"
+        "cookie = request.cookies.get('session')\n"
+        "csrf_origin = request.headers.get('Host')\n"
+        "if \"https\" == scheme: pass\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R052-hdritrust"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2073,6 +2129,7 @@ def test_every_rule_has_test_exposure():
         "R049-fixatn",
         "R050-dynimp",
         "R051-hostpois",
+        "R052-hdritrust",
     }
     assert exposed <= rids
     uncovered = rids - exposed

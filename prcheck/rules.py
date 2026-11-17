@@ -1336,6 +1336,41 @@ _RULE_TUPLES = [
         r"|\b(?:url|uri|href|link|redirect|callback|return_url|reset|verify|confirm|invite)\w*\s*=\s*(?!=)(?![^\n]*(?:==|!=))))",
         "A redirect or absolute URL built from the client-supplied Host header — CWE-644 (Improper Neutralization of a Host Header). Before using request.host/host_url for a redirect target, password-reset link or callback URL, validate it against an explicit allow-list of server hostnames (Django ALLOWED_HOSTS, a constant origin map), then build the URL from the validated value or a config constant — never from the raw header, and always add Vary: Host for caching",
     ),
+    (
+        "R052-hdritrust",
+        "security",
+        "high",
+        "Security decision based on a client-spoofable forwarded/proxy header",
+        # CWE-807 (Use of Untrusted Inputs in a Security Decision) / CWE-348
+        # (Use of Less Trusted Source): X-Forwarded-For / X-Real-IP /
+        # X-Client-IP / CF-Connecting-IP / True-Client-IP / X-Forwarded-Host /
+        # X-Forwarded-Proto(-col) / X-Scheme / X-Forwarded-Port /
+        # X-Forwarded-Url / X-Original-URL / X-Rewrite-URL / Forwarded are
+        # injected by the caller unless a trusted reverse proxy strips or
+        # overwrites them first — so reading one for an IP allowlist, rate
+        # limit, auth, scheme or URL decision lets clients forge the value:
+        # bypass IP-based access control, downgrade HTTPS checks, or poison
+        # generated absolute URLs.  Requires BOTH the spoofable-header source
+        # and an in-line decision signal: identity/scheme assignment (space
+        # around '=' keeps name= keyword args quiet), request.environ /
+        # request.remote_addr / request.ip re-assignment, comparison against a
+        # trust list (ALLOWED/WHITELIST/INTERNAL/TRUSTED/BLOCK/DENY, dotted
+        # names allowed), a security verb (abort/raise/rate_limit/RateLimiter/
+        # authenticate/authorize/is_admin/csrf), an https scheme comparison, a
+        # redirect(...) call, or an http(s) literal.  Log lines, plain reads
+        # into generic variables, and display-only uses carry no decision
+        # signal and stay quiet (single-line contract, same as R051).
+        r"(?i)"
+        r"(?=[^\n]*(?:(?:request|req)\.headers\s*\[\s*['\"](?:x-forwarded-for|x-real-ip|x-client-ip|cf-connecting-ip|true-client-ip|x-forwarded-host|x-forwarded-proto|x-forwarded-protocol|x-scheme|x-forwarded-port|x-forwarded-url|x-original-url|x-rewrite-url|forwarded)['\"]\s*\]"
+        r"|(?:request|req)\.headers(?:\.get\s*)?\(\s*['\"](?:x-forwarded-for|x-real-ip|x-client-ip|cf-connecting-ip|true-client-ip|x-forwarded-host|x-forwarded-proto|x-forwarded-protocol|x-scheme|x-forwarded-port|x-forwarded-url|x-original-url|x-rewrite-url|forwarded)['\"]\s*\)"
+        r"|(?:request|req)\.header\s*\(\s*['\"](?:x-forwarded-for|x-real-ip|x-client-ip|cf-connecting-ip|true-client-ip|x-forwarded-host|x-forwarded-proto|x-forwarded-protocol|x-scheme|x-forwarded-port|x-forwarded-url|x-original-url|x-rewrite-url|forwarded)['\"]\s*\)))"
+        r"(?=[^\n]*(?:\b(?:ip|addr(?:ess)?|remote(?:_addr)?|client(?:_ip)?|user(?:_ip|_id)?|email|scheme|proto(?:col)?|secure|is_secure|trusted\w*|allowlist(?:ed)?|whitelist(?:ed)?|blocklist(?:ed)?|url|uri|href|link|path|target|callback|redirect|next)\w*\s*(?<=\s)=(?!=)"
+        r"|(?:request|req)\.(?:environ\s*\[\s*['\"]REMOTE_ADDR['\"]\s*\]|remote_addr|ip|client|host)\s*=\s*(?!=)"
+        r"|(?:==|!=|\b(?:not\s+)?in\b)\s*(?:\w+\.)*(?:allowed|whitelist|internal|trusted|block|deny)\w*"
+        r"|\b(?:abort\s*\(|raise\s+\w+\b|rate_limit\w*\b|RateLimiter\b|authenticate\b|authorize\b|is_admin\b|csrf\b)"
+        r"|\bredirect\s*\(|\bhttps?://|(?:==|!=)\s*['\"]https['\"]))",
+        "An IP allowlist, rate-limit, authorization, scheme or URL decision that trusts a client-spoofable proxy header — CWE-807 / CWE-348. X-Forwarded-For / X-Real-IP / X-Client-IP / CF-Connecting-IP / True-Client-IP / X-Forwarded-Host / X-Forwarded-Proto(-col) / X-Scheme / X-Forwarded-Url / X-Original-URL / X-Rewrite-URL / Forwarded are written by the caller unless your reverse proxy strips them, so reading one for authentication, an IP allowlist, rate limiting or scheme handling lets clients forge the value: bypass IP-based access control, downgrade HTTPS checks, or poison generated absolute URLs. Strip request-supplied proxy headers on the trusted edge, then use the proxy-reported peer address (request.remote_addr / socket peer or PROXY protocol v2) and the internally-known scheme",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
