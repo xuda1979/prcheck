@@ -380,7 +380,22 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   `disallow-doctype-decl`), fully-literal or constant sources, ALL_CAPS
   concat operands, node-model building (`builder.newDocument()`), validation,
   transformers/serializers, streaming char reads and non-parse streams stay
-  quiet).
+  quiet), and Java path traversal
+  (`new File`-family constructors — `File`/`FileInputStream`/
+  `FileOutputStream`/`FileReader`/`FileWriter`/`RandomAccessFile` —
+  `Files.*` helpers via `Paths.get(...)` (`readAllBytes`/`readAllLines`/
+  `readString`/`write`/`copy`/`newInputStream`/`newBufferedReader`/
+  `newBufferedWriter`/`lines`/`delete`/`move`/`createDirectories`/
+  `createFile`) and upload writes (`fileItem.write`/`part.write`/
+  `multipartFile.transferTo`) fed a `request.*` accessor
+  (`getParameter`/`getHeader`/`getQueryString`/`getRequestURI`), a
+  `'...' + lowercaseIdentifier` concat or a filename-named variable
+  (`fileName`/`filename`/`originalFilename`/`fname`) — a `'..'`-crafted or
+  absolute path escapes the sandbox, reading secrets / overwriting configs —
+  CWE-22; fully-literal paths, SCREAMING_SNAKE constants, ALL_CAPS concat
+  operands, parent + literal second-arg `File` ctor calls, classpath
+  `getResourceAsStream` lookups, UUID/timestamp generation and getter-only
+  filename expressions (`part.getSubmittedFileName()`) stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

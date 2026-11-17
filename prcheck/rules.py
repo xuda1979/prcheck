@@ -1754,6 +1754,46 @@ _RULE_TUPLES = [
         r")",
         "A Java XML parser fed client-controlled input without entity-expansion hardening — CWE-611 XXE. JAXP DocumentBuilderFactory/SAXParserFactory newInstance chains (.parse) and DOM4J SAXReader (.read), plus builder/documentBuilder/saxParser/reader/xmlReader receivers, parse a document assembled from a request accessor (getInputStream/getReader/getParameter/getPart/getHeader), an upload file stream, a '+' concatenation, a builder/.toString() chain or an xml-named variable: a crafted DOCTYPE with an external entity SYSTEM reference makes the parser read files (/etc/passwd) or hit internal URLs, and billion-laughs nested entities exhaust memory. Harden the factory (disallow-doctype-decl, external DTD/entity features off), validate the source against a whitelist or a schema-less in-memory safe parser, and refuse non-well-formed client documents",
     ),
+    (
+        "R063-javapath",
+        "security",
+        "high",
+        "Java file-path sink (new File / Files / upload write) fed client-controlled or concatenated input (path traversal)",
+        # CWE-22 (Improper Limitation of a Pathname to a Restricted
+        # Directory): java.io.File-family constructors
+        # (File/FileInputStream/FileOutputStream/FileReader/FileWriter/
+        # RandomAccessFile), the java.nio Files.* helpers fed a
+        # Paths.get(...) argument (readAllBytes/readAllLines/readString/
+        # write/copy/newInputStream/newBufferedReader/newBufferedWriter/
+        # lines/delete/move/createDirectories/createFile) and upload
+        # write sinks (fileItem.write/part.write/multipartFile.transferTo)
+        # compute the target path from a request accessor
+        # (getParameter/getHeader/getQueryString/getRequestURI), a '+'
+        # concatenation of a lowercase identifier, or a filename-named bare
+        # variable (fileName/filename/originalFilename/fname).  A
+        # '..'-crafted or absolute attacker-supplied path then reaches files
+        # outside the intended sandbox: arbitrary file read/overwrite,
+        # config or keystore disclosure and code execution via write-into-
+        # deploy-location.  Literal/SCREAMING_SNAKE constant paths, ALL_CAPS
+        # concat operands, parent + literal second-arg File ctor calls,
+        # classpath getResourceAsStream lookups, UUID/timestamp generation
+        # and getter-only expressions (part.getSubmittedFileName(),
+        # fileItem.getName()) stay quiet.  Java sources are case-sensitive
+        # CamelCase, so no inline flag (same convention as R053-R062).
+        # Single-line contract.
+        r"(?:"
+        r"\bnew\s+(?:File|FileInputStream|FileOutputStream|FileReader|FileWriter|RandomAccessFile)\s*\([^)\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\("
+        r"|\bnew\s+(?:File|FileInputStream|FileOutputStream|FileReader|FileWriter|RandomAccessFile)\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\b(?:part|fileItem|multipartFile|upload)\w*\s*\.\s*(?:write|transferTo)\s*\([^)\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString)\s*\("
+        r"|\b(?:part|fileItem|multipartFile|upload)\w*\s*\.\s*(?:write|transferTo)\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\b(?:part|fileItem|multipartFile|upload)\w*\s*\.\s*(?:write|transferTo)\s*\([^)\n]*\b(?:fileName|filename|originalFilename|fname)\w*\s*\)"
+        r"|\bnew\s+File\s*\([^,)\n]*,\s*(?!['\"])(?:fileName|filename|originalFilename|fname|name|input|key|id)\w*\s*\)"
+        r"|\bnew\s+(?:File|FileInputStream|FileOutputStream|FileReader|FileWriter|RandomAccessFile)\s*\(\s*(?!['\"]|\d)(?=[A-Za-z_]\w*[a-z])(?:savePath|uploadPath|filePath|fileName|filename|originalFilename|tmpFile|saveFile|targetPath|destPath|outputPath|pathname|target|dest|output|path)\w*\s*\)"
+        r"|\bFiles\s*\.\s*(?:readAllBytes|readAllLines|readString|write|copy|newInputStream|newBufferedReader|newBufferedWriter|lines|delete|move|createDirectories|createFile)\s*\(\s*Paths\s*\.\s*get\s*\([^)\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\("
+        r"|\bFiles\s*\.\s*(?:readAllBytes|readAllLines|readString|write|copy|newInputStream|newBufferedReader|newBufferedWriter)\s*\(\s*Paths\s*\.\s*get\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r")",
+        "A Java file-path sink built from client-controlled input — CWE-22 path traversal. new File-family constructors (File/FileInputStream/FileOutputStream/FileReader/FileWriter/RandomAccessFile), Files.* helpers over Paths.get(...) (readAllBytes/readAllLines/readString/write/copy/newInputStream/newBufferedReader/newBufferedWriter/lines/delete/move/createDirectories/createFile) and upload writes (fileItem.write/part.write/multipartFile.transferTo) resolve the target from a request accessor (getParameter/getHeader/getQueryString/getRequestURI), a '+' concatenation or a filename-named variable: a '..'-laden or absolute value selects files outside the sandbox, so an attacker can read secrets, overwrite configs or write a file into a deployable location. Validate and normalize the path, canonicalize it with File.getCanonicalPath()/Paths.toRealPath() and reject values escaping the allowed base directory; derive upload names on the server side instead of trusting client filename",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

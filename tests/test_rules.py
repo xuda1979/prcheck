@@ -2592,6 +2592,72 @@ def test_javaxxe_hardened_literal_or_non_parse_targets_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R062-javaxxe"], issues
 
 
+def test_javapath_request_derived_or_string_built_target_flagged():
+    """R063-javapath fires when a Java file-path sink — new File-family
+    constructors, Files.* helpers over Paths.get(...) or upload writes —
+    resolves its target from a request accessor, a concatenated string or a
+    filename-named variable (CWE-22: '..' or absolute input escapes the
+    intended directory)."""
+    src = (
+        'File f = new File(request.getParameter("path"));\n'
+        'File target = new File(req.getParameter("fileName"));\n'
+        'new FileInputStream(request.getParameter("file"));\n'
+        'FileOutputStream out = new FileOutputStream(req.getParameter("out"));\n'
+        'new FileReader(request.getHeader("file"));\n'
+        'new FileWriter(req.getParameter("report"));\n'
+        'RandomAccessFile raf = new RandomAccessFile(request.getParameter("path"), "r");\n'
+        'Files.readAllBytes(Paths.get(request.getParameter("path")));\n'
+        'String s = Files.readString(Paths.get(req.getParameter("data")));\n'
+        'Files.write(Paths.get(request.getParameter("out")), data);\n'
+        'new File("uploads/" + userName);\n'
+        'FileOutputStream fos = new FileOutputStream("/srv/" + request.getParameter("name"));\n'
+        'fileItem.write(new File(directory, fileName));\n'
+        'new File(savePath);\n'
+        'part.write("uploads/" + request.getParameter("name"));\n'
+        'multipartFile.transferTo(new File(uploadDir, request.getParameter("fileName")));\n'
+        'File out = new File(uploadDirectory, originalFilename);\n'
+        'fileItem.write(saveDirectory + fileName);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R063-javapath"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javapath_literal_constant_or_classpath_targets_stay_quiet():
+    """R063-javapath stays quiet for literal paths, SCREAMING_SNAKE
+    constants, ALL_CAPS concat operands, parent + literal second-arg File
+    constructor calls, classpath getResourceAsStream lookups, UUID/timestamp
+    generation and getter-only filename expressions — no path sink is fed
+    traversable input."""
+    src = (
+        'File f = new File("/etc/hostname");\n'
+        'File f = new File(XML_PATH);\n'
+        'File f = new File(ROOT_DIR, "webapp/index.html");\n'
+        'new FileInputStream(STATIC_FILE);\n'
+        'Paths.get("data", "users.csv");\n'
+        'Paths.get(System.getProperty("java.io.tmpdir"), "app.log");\n'
+        'Files.readAllLines(Paths.get(getClass().getResource("/config.properties").toURI()));\n'
+        'new FileInputStream("/etc/passwd");\n'
+        'InputStream in = this.getClass().getResourceAsStream("/templates/home.html");\n'
+        'new ByteArrayInputStream(data);\n'
+        'String path = "uploads/" + UUID.randomUUID();\n'
+        'part.write("uploads/stable.txt");\n'
+        'fileItem.write(new File("uploads", "fixed.csv"));\n'
+        'Files.newInputStream(Paths.get(XML_PATH));\n'
+        'new File(f.getParent(), "child.xml");\n'
+        'File dir = new File("/app/data"); dir.mkdirs();\n'
+        'String fileName = part.getSubmittedFileName();\n'
+        'File out = new File(cacheDir, "result.txt");\n'
+        'Files.copy(inputStream, Paths.get("/var/lib/app/data.bin"));\n'
+        'new PrintWriter(new FileWriter("/var/log/app.log", true));\n'
+        'File tmp = new File(tempDir);\n'
+        'new File(dataDir, "index.html");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R063-javapath"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2779,6 +2845,7 @@ def test_every_rule_has_test_exposure():
         "R060-openredir",
         "R061-ldapjndi",
         "R062-javaxxe",
+        "R063-javapath",
     }
     assert exposed <= rids
     uncovered = rids - exposed
