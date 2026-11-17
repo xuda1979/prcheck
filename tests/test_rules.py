@@ -823,6 +823,54 @@ def test_ssrf_js_literals_and_nonjs_receivers_quiet():
     assert not [i for i in issues if i.rule_id == "R031-ssrf-js"], issues
 
 
+def test_cmd_node_child_process_sinks_flagged():
+    """R032-cmd-node flags Node child_process exec/spawn calls building a shell
+    command from a variable / request input / interpolation (CWE-78): non-literal
+    exec/execSync args, `${}` backtick templates, concatenated command strings,
+    shell:true enabled execs and sh -c arrays."""
+    src = (
+        "child_process.exec(req.query.cmd)\n"
+        "const out = execSync(`rm -rf /tmp/${req.body.path}`)\n"
+        "cp.exec('ls -la ' + request.query.dir)\n"
+        "execFileSync(userCmd, { shell: true })\n"
+        "child_process.execSync(command, { stdio: 'inherit' })\n"
+        "spawn('/bin/sh', ['-c', userInput])\n"
+        "exec(`git clone ${targetUrl}`)\n"
+        "cp.execFile('run.sh', [req.query.arg], { shell: true })\n"
+        "process.execSync('git status ' + branchName)\n"
+        "cp.spawnSync('/bin/sh', ['-c', req.params.cmd])\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R032-cmd-node"]
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], f"R032-cmd-node mismatch: {hits}"
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_cmd_node_child_process_literals_and_safe_spawns_quiet():
+    """R032-cmd-node must not fire on literal quoted commands, SCREAMING_CASE
+    constants, argument-list spawns without an enabled shell, Python exec() /
+    subprocess forms, or non-child_process receivers."""
+    src = (
+        "child_process.exec('ls -la')\n"
+        "execSync('git rev-parse HEAD')\n"
+        "spawn('ls', ['-la'])\n"
+        "execFile('git', ['status', '--short'])\n"
+        "cp.execFileSync('node', ['--version'])\n"
+        "const { exec } = require('child_process'); exec('clean', ['start'])\n"
+        "exec(code)\n"
+        "process.execPath\n"
+        "cp.execSync(BASE_CMD)\n"
+        "spawn('python', ['-c', code])\n"
+        "git.exec('pull')\n"
+        "subprocess.run(['ls'], shell=True)\n"
+        "exec(`ls -la`)\n"
+        "child_process.exec(`echo done`)\n"
+        "spawn('git', ['-c', 'core.pager=cat', 'log'])\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R032-cmd-node"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -989,7 +1037,7 @@ def test_every_rule_has_test_exposure():
         "R017-redirect", "R018-debug", "R019-csrf", "R020-pem", "R021-ssrf",
         "R022-ssti", "R023-xxe", "R024-jwt", "R025-pw", "R026-upload",
         "R027-massassig", "R028-nosql", "R029-ldap", "R030-xpath",
-        "R031-ssrf-js",
+        "R031-ssrf-js", "R032-cmd-node",
     }
     assert exposed <= rids
     uncovered = rids - exposed

@@ -173,7 +173,7 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   SQL injection, insecure deserialization (pickle/cPickle/marshal/joblib,
   `yaml.load`/`full_load`/`unsafe_load`, `np.load(allow_pickle=True)`,
   `torch.load`, `read_pickle`, `shelve`), dependency changes, CORS, privilege
-  checks, IDOR, insecure HTTP, OS command injection via shell, path
+  checks, IDOR, insecure HTTP, OS command injection via shell (Python) or Node child_process exec/spawn, path
   traversal, XSS sinks (innerHTML/outerHTML/document.write, React
   `dangerouslySetInnerHTML`, jQuery `.html()` setters), session cookie flags,
   weak/legacy crypto, insecure

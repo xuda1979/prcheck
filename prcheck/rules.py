@@ -670,6 +670,56 @@ _RULE_TUPLES = [
         r")",
         "A URL built from request input reaches an external-fetch CLI (fetch/axios/got/Node http or XMLHttpRequest); validate/whitelist the URL before use (SSRF/CWE-918)",
     ),
+    (
+        "R032-cmd-node",
+        "security",
+        "high",
+        "OS command injection: Node child_process exec/spawn fed a non-literal shell command",
+        # Fires when a Node child_process call builds a shell command from a
+        # variable / request input / interpolation on a single added line
+        # (CWE-78):
+        #   (A) child_process/cp/proc/process-qualified exec|execSync and bare
+        #       execSync fed a NON-LITERAL first argument (a lowercase bare
+        #       identifier or a `${...}`-interpolated backtick template).  exec
+        #       always runs a shell, so any non-constant command string is an
+        #       injection point.  Quoted literals and SCREAMING_CASE constants
+        #       stay quiet; unqualified exec( is left to R004 (Python builtin
+        #       exec() isn't double-flagged).
+        #   (B) qualified exec|execFile|execSync|execFileSync whose command
+        #       string is concatenated / interpolated (first arg may start with
+        #       a quoted literal), plus destructured unqualified exec( ONLY when
+        #       a backtick template literal renders the command (JS-unique;
+        #       Python f-strings are R004's domain).
+        #   (C) spawn/spawnSync/execFile/execFileSync with the shell ENABLED
+        #       (shell: true or a shell variable); shell: false stays quiet.
+        #   (D) sh -c array invocation (spawn('/bin/sh', ['-c', cmd]) /
+        #       execFile of a shell) — mirrors R012's shell "-c" detection for
+        #       the Node spawn family.
+        r"(?i)(?:"
+        # (A) qualified exec/execSync and bare execSync fed a non-literal command.
+        r"(?:(?:\bchild_process\s*\.\s*|\b(?:cp|proc|process)\s*\.\s*)"
+        r"(?:exec|execSync)\s*\(|\bexecSync\s*\()"
+        r"\s*(?!['\"])(?:"
+        r"(?-i:(?=[A-Za-z_]\w*[a-z]))[A-Za-z_]\w*"
+        r"|`[^`\n]*\$\{"
+        r")"
+        r"|"
+        # (B) qualified exec family with concatenated / templated command string,
+        #     plus destructured unqualified exec( with a backtick interpolation.
+        r"(?:\bchild_process\s*\.\s*|\b(?:cp|proc|process)\s*\.\s*)"
+        r"(?:exec|execFile|execSync|execFileSync)\s*\([^\n]*(?:\+|\$\{|`[^`\n]*\$\{)|"
+        r"\bexec\s*\(`[^`\n]*\$\{"
+        r"|"
+        # (C) spawn family executing through an enabled shell.
+        r"\b(?:spawn|spawnSync|execFile|execFileSync)\s*\([^\n]*"
+        r"shell\s*:\s*['\"]?(?!false\b)\w+"
+        r"|"
+        # (D) sh -c array invocation.
+        r"\b(?:spawn|spawnSync|exec|execSync|execFile|execFileSync)\s*\([^\n]*"
+        r"\b(?:sh|bash|zsh|ksh|csh|tcsh|dash|ash|fish|pwsh|powershell)\b[^\n]*['\"]-c['\"]"
+        r")",
+        "A Node child_process call builds its shell command from a variable / request input / interpolation; exec always runs a shell — validate or whitelist the command and avoid shell:true / sh -c patterns (command injection/CWE-78)",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
