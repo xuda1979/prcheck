@@ -2012,6 +2012,58 @@ def test_javaexec_static_literals_other_sinks_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R053-javaexec"], issues
 
 
+def test_javadeser_non_literal_stream_flagged():
+    """R054-javadeser fires when ObjectInputStream or XMLDecoder is
+    constructed from a non-literal stream — a request accessor, uploaded
+    file, socket, byte buffer or any bare variable (CWE-502: readObject /
+    XMLDecoder turn attacker-controlled bytes into live objects)."""
+    src = (
+        "ObjectInputStream ois = new ObjectInputStream(request.getInputStream());\n"
+        "new XMLDecoder(request.getInputStream()).readObject();\n"
+        "ObjectInputStream in = new ObjectInputStream(is);\n"
+        "ObjectInputStream in = new ObjectInputStream(inputStream);\n"
+        "new ObjectInputStream(new FileInputStream(uploadedFile))\n"
+        "new ObjectInputStream(new ByteArrayInputStream(body.getBytes()))\n"
+        "new XMLDecoder(new BufferedInputStream(new FileInputStream(userFile)))\n"
+        "new ObjectInputStream(socket.getInputStream()).readObject();\n"
+        "new ObjectInputStream(conn.getInputStream());\n"
+        'new ObjectInputStream(new FileInputStream(env.get("UPLOAD_DIR") + "/" + name));\n'
+        'Object o = new ObjectInputStream(req.getPart("file").getInputStream()).readObject();\n'
+        "XMLDecoder decoder = new XMLDecoder(new ByteArrayInputStream(xmlBytes));\n"
+        "ObjectInputStream ois = new ObjectInputStream(cache.loadStreamByKey(userKey));\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R054-javadeser"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javadeser_literal_classpath_or_plain_reference_stays_quiet():
+    """R054-javadeser stays quiet for all-literal stream chains, classpath /
+    this.getClass() resource loads (developer-bundled), readObject() follow-up
+    calls, declarations, class.forName/import and any non-construction use —
+    no attacker-touchable stream reaches the deserialization sink."""
+    src = (
+        'new ObjectInputStream(new FileInputStream("data.bin"));\n'
+        'new ObjectInputStream(new BufferedInputStream(new FileInputStream("data.dat")));\n'
+        "ois.readObject();\n"
+        "import java.io.ObjectInputStream;\n"
+        'Class<?> c = Class.forName("ObjectInputStream");\n'
+        'new ObjectInputStream(ClassLoader.getSystemResourceAsStream("conf.ser"))\n'
+        "new XMLDecoder(new ByteArrayInputStream(XML_TEMPLATE.getBytes()));\n"
+        "Object sig = new ObjectInputStream(new ByteArrayInputStream(HARDCODED_BYTES));\n"
+        'new ObjectInputStream(this.getClass().getResourceAsStream("data.ser"))\n'
+        'new ObjectInputStream(this.getClass().getClassLoader().getResourceAsStream("x.ser"))\n'
+        "ObjectInputStream ois = null;\n"
+        "public ObjectInputStream create(InputStream in) { return in; }\n"
+        'String s = "ObjectInputStream(" + x + ")";\n'
+        'new ObjectInputStream(new FileInputStream("config" + File.separator + "data.bin"));\n'
+        'ObjectInputStream in = new ObjectInputStream(new ByteArrayInputStream("payload".getBytes()));\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R054-javadeser"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2190,6 +2242,7 @@ def test_every_rule_has_test_exposure():
         "R051-hostpois",
         "R052-hdritrust",
         "R053-javaexec",
+        "R054-javadeser",
     }
     assert exposed <= rids
     uncovered = rids - exposed

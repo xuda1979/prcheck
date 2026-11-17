@@ -1398,6 +1398,32 @@ _RULE_TUPLES = [
         r"|\bProcessBuilder\s*\([^)\n]*['\"]\s*\+\s*[A-Za-z_]\w*[^)\n]*\))",
         "Java Runtime.getRuntime().exec(...) / ProcessBuilder fed a non-literal command or argument — CWE-78 OS command injection. The Java runtime forwards the exec parameter to the shell (/bin/sh -c), so command separators in request.input, a request parameter, an @RequestBody body, env lookup, argv or a concatenated variable execute attacker code. Validate the command against an allow-list at the boundary, prefer exec-array executors that bypass the shell, and never interpolate request data into a shell string",
     ),
+    (
+        "R054-javadeser",
+        "security",
+        "high",
+        "Java deserialization of a non-literal input stream (ObjectInputStream / XMLDecoder)",
+        # CWE-502 (Deserialization of Untrusted Data): ObjectInputStream
+        # readObject and XMLDecoder reconstruct object graphs straight from an
+        # InputStream, so serialized data from a request (getInputStream /
+        # getPart(...).getInputStream), an uploaded file, a socket, or any bare
+        # variable/body buffer can be groomed into arbitrary gadget chains —
+        # full pre-auth RCE on the JVM (this is what ysoserial exploits).  The
+        # construction's stream argument must be attacker-touchable: either a
+        # lowercase-started identifier or method chain (request accessor,
+        # variable, factory call) directly, or one-or-more nested `new
+        # StreamX(...)` wrappers ending on such a non-literal argument.
+        # All-literal chains, ClassLoader/system-resource and this.getClass()
+        # classpath loads (developer-bundled resources), follow-up method calls
+        # like readObject() itself, declarations (ObjectInputStream ois = null)
+        # and import/method-declaration uses carry no constructed sink and stay
+        # quiet.  Java sources are case-sensitive CamelCase, so no inline flag
+        # is used (same convention as R053).  Single-line contract.
+        r"\b(?:ObjectInputStream|XMLDecoder)\s*\(\s*(?!new\b|this\s*\.\s*getClass\b)[a-z]\w*[^)\n]*\)"
+        r"|\b(?:ObjectInputStream|XMLDecoder)\s*\((?:(?:new|final)\s+[\w.]+\(\s*)+?"
+        r"(?!new\b|['\"\d]|this\s*\.\s*getClass\b)[a-z]\w*",
+        "Java ObjectInputStream/XMLDecoder populated from a non-literal stream — CWE-502 unsafe deserialization. readObject() and XMLDecoder turn serialized bytes into live objects, so request input, an uploaded file or a socket stream fed to these sinks can be crafted into a gadget chain for pre-auth remote code execution (ysoserial). Never deserialize data you don't trust: reject serialized-object formats at the boundary, use a safe format (JSON/Protobuf), or at minimum ring-fence ObjectInputStream with a class allow-list and validate the stream's provenance",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

@@ -271,7 +271,13 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   the exec argument to the shell (`/bin/sh -c`), so command separators execute
   attacker code — CWE-78; all-literal commands, ProcessBuilder config-only
   calls and regex `.exec(...)` stay quiet, and Node `child_process.exec` /
-  Python `subprocess` remain owned by R032/R012).
+  Python `subprocess` remain owned by R032/R012), Java deserialization of a
+  non-literal stream (`ObjectInputStream` / `XMLDecoder` constructed from a
+  request/upload/socket variable or nested `new StreamX(...)` wrapper chain —
+  `readObject()`/XMLDecoder rebuild live object graphs from the bytes, so
+  request-sourced streams can carry ysoserial gadget chains for pre-auth RCE;
+  all-literal chains, classpath/`this.getClass()` resource loads and
+  follow-up `readObject()` calls stay quiet — CWE-502).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
