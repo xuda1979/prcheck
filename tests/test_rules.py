@@ -174,6 +174,32 @@ def test_insecure_deserialization_sinks_flagged():
     assert hits == [1, 2, 3, 4, 5, 6, 7], f"R004 line mismatch: {hits}"
 
 
+def test_bare_eval_exec_compile_flagged_but_method_calls_quiet():
+    """R004's first alternative must only fire on bare eval/exec/compile calls —
+    not re.compile, obj.eval / foo.exec / self.compile method forms or
+    identifiers sharing the same prefix."""
+    src = (
+        "eval(user_input)\n"
+        "x = eval(buf)\n"
+        "exec(code)\n"
+        "compile(src, 'f.py', 'exec')\n"
+        "pattern = re.compile(request.form['x'])\n"
+        "re.compile(f'^{user}$', re.IGNORECASE)\n"
+        "re.compile(EMAIL_PATTERN)\n"
+        "foo.eval(codebuf)\n"
+        "obj.exec(cmd)\n"
+        "self.compile(src)\n"
+        "code.eval(source)\n"
+        "node.evaluate(x)\n"
+        "if eval_result:\n"
+        "executable = True\n"
+        "compiled = bytecode\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i.line for i in issues if i.rule_id == "R004"]
+    assert hits == [1, 2, 3, 4], f"R004 bare-call mismatch: {hits}"
+
+
 def test_create_table_ddl_and_raise_http_error_status_flagged():
     """D002-bb flags raw CREATE TABLE DDL; B003 flags raise Http404 / abort(404)."""
     src = (

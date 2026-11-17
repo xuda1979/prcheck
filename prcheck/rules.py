@@ -82,7 +82,7 @@ _RULE_TUPLES = [
         "security",
         "medium",
         "eval / exec / pickling of untrusted input",
-        r"(?i)\b(?:eval|exec|compile)\s*\(|"
+        r"(?i)(?<![A-Za-z0-9_.])(?:eval|exec|compile)\s*\(|"
         r"\b(?:pickle|cPickle|_pickle|dill|marshal|joblib)\.(?:load|loads)\s*\(|"
         r"\b(?:pickle|cPickle|_pickle|dill)\.Unpickler\s*\(|"
         r"\byaml\.(?:full_load(?:_all)?|unsafe_load(?:_all)?)\s*\(|"
