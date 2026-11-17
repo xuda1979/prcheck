@@ -1138,6 +1138,44 @@ _RULE_TUPLES = [
         r")",
         "Tokens, sessions and credentials in localStorage/sessionStorage are readable by any injected script and survive to be exfiltrated — keep bearer material in an httpOnly, Secure, SameSite cookie (or a memory-only holder) so XSS cannot reach it (CWE-922)",
     ),
+    (
+        "R045-cookie",
+        "security",
+        "medium",
+        "Security-sensitive token/credential written to document.cookie",
+        # Client-side cookie writes (CWE-922): a cookie set from JavaScript via
+        # document.cookie can never be httpOnly, so any XSS reads the bearer
+        # material straight off document.cookie. Fires on a single added line
+        # for a *write* (x =, += ; not ==) whose scanned right-hand side or key
+        # mentions a security name.  The bounded [^;\n]*? scan only reaches the
+        # same statement, so a security keyword in a later statement on the line
+        # (gh_token = …; document.cookie = 'theme=dark';) stays quiet.  Two
+        # identifier atoms keep false positives out of plain words:
+        #   (A) standalone / snake_case / camel-head names — the R044/R002
+        #       compound-name idiom ((?<=_) or non-identifier start), plus
+        #       case-sensitive (?=(?-i:[A-Z])) so 'tokenStr' fires while
+        #       'tokenizer'/'tokens'/'aTokens' (plural/suffix forms) stay
+        #       quiet despite the global (?i) rule.
+        #   (B) camel-tail names (userToken / getToken()/sessionId) — a
+        #       lowercase letter must precede the match, and the tail ends at a
+        #       non-identifier, end-of-line, or case-sensitive camel boundary.
+        # Reads (x = document.cookie;), comparisons (==), other storage sinks
+        # (R044's localStorage/sessionStorage), and generic keys are never
+        # flagged here.
+        r"(?i)\bdocument\s*\.\s*cookie\b\s*(?:=[^=]|[+\-]=)[^;\n]*?"
+        r"(?:"
+        r"(?:(?<=_)|(?<![A-Za-z0-9_]))(?:session(?!\s*storage)(?:[_-]?id)?|jwt|"
+        r"csrf(?:[_-]?token)?|access[_-]?token|refresh[_-]?token|id[_-]?token|"
+        r"oauth[_-]?token|auth(?:[_-]?token)?|credential|api[_-]?key|secret|"
+        r"private[_-]?key|passw(?:ord|d)|token|sid)(?:\b|(?=[_-])|(?=(?-i:[A-Z])))"
+        r"|"
+        r"(?<=(?-i:[a-z]))(?:session(?!\s*storage)(?:[_-]?id)?|jwt|"
+        r"csrf(?:[_-]?token)?|access[_-]?token|refresh[_-]?token|id[_-]?token|"
+        r"oauth[_-]?token|auth(?:[_-]?token)?|credential|api[_-]?key|secret|"
+        r"private[_-]?key|passw(?:ord|d)|token|sid)(?=$|[^A-Za-z0-9_]|(?=(?-i:[A-Z])))"
+        r")",
+        "Security values written to document.cookie can never be httpOnly — any XSS reads them straight off the cookie object, and the value mirrors any URL-derivable cookie your server could have scoped instead (CWE-922). Keep tokens in an httpOnly, Secure, SameSite cookie set server-side and never touch document.cookie for bearer material",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

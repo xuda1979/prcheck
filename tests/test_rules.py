@@ -1541,6 +1541,73 @@ def test_storage_generic_or_read_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R044-storage"], issues
 
 
+def test_cookie_security_key_or_value_flagged():
+    """R045-cookie flags client-side *writes* of security-named keys or
+    values to document.cookie — plain '=', '+=' with snake_case keys and
+    camelCase values (tokens/sessions/credentials can never be httpOnly,
+    so XSS reads them straight off the cookie object, CWE-922)."""
+    src = (
+        "document.cookie = 'token=' + res.token;\n"
+        "document.cookie = `session=${sess}`;\n"
+        'document.cookie = "jwt=" + tok;\n'
+        "document.cookie += 'csrf_token=' + c;\n"
+        "document.cookie = 'access_token=' + at;\n"
+        "document.cookie = 'sid=' + sess;\n"
+        'document.cookie = "user_token=" + u;\n'
+        "document.cookie = 'credential=' + cred;\n"
+        "document.cookie = 'api_key=' + k;\n"
+        "document.cookie = 'secret=' + s;\n"
+        "document.cookie = 'password=' + p;\n"
+        "document.cookie = 'sessionid=' + s;\n"
+        "document.cookie = 'SESSION_ID=' + s;\n"
+        "document.cookie = 'sid=' + sessionId;\n"
+        "document.cookie = tokenStr + '; path=/';\n"
+        "document.cookie = 'x=' + userToken;\n"
+        "document.cookie = 'k=' + getToken();\n"
+        "document.cookie = 'auth=' + jwt;\n"
+        "document.cookie = 'data=' + accessToken;\n"
+        "document.cookie = 'a=' + authToken;\n"
+        "document.cookie = 'a=' + apiKey;\n"
+        "document.cookie = 'a=' + sessionId;\n"
+        "document.cookie = sessionStorage.getItem('token');\n"
+        "document.cookie = 'k=' + session;\n"
+        "document.cookie = 'auth=' + auth;\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R045-cookie"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), (
+        f"R045-cookie mismatch: {hits}"
+    )
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_cookie_generic_compare_or_read_stays_quiet():
+    """R045-cookie stays quiet for generic keys (theme/lang/foo), reads,
+    equality comparisons, other storage sinks (localStorage/sessionStorage),
+    a security keyword in a *later* statement on the same line, and
+    plural/suffix identifier forms (tokenizer/tokens/aTokens/tokenize)."""
+    src = (
+        "document.cookie = 'theme=dark';\n"
+        "document.cookie = 'lang=en';\n"
+        "document.cookie = 'foo=1; bar=2';\n"
+        "x = document.cookie;\n"
+        "document.cookie;\n"
+        "localStorage.setItem('token', t);\n"
+        "sessionStorage.jwt = x;\n"
+        "document.cookie = '';\n"
+        'document.cookie = "module=\'foo\'";\n'
+        "document.cookie = 'foo=1'; login(token);\n"
+        "document.cookie = 'v=' + tokenizer(name);\n"
+        "document.cookie = 'v=' + tokens;\n"
+        "document.cookie = 'v=' + aTokens;\n"
+        "document.cookie = 'v=' + tokenize(x);\n"
+        "if (document.cookie == saved) return;\n"
+        "gh_token = 'x'; document.cookie = 'theme=dark';\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R045-cookie"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1710,7 +1777,7 @@ def test_every_rule_has_test_exposure():
         "R031-ssrf-js", "R032-cmd-node", "R033-protopoll",
         "R034-redos", "R035-hdrinj", "R036-loginj", "R037-credurl",
         "R038-perm", "R039-nav", "R040-tabnab", "R041-postmsg",
-        "R042-websock", "R043-math-random", "R044-storage",
+        "R042-websock", "R043-math-random", "R044-storage", "R045-cookie",
     }
     assert exposed <= rids
     uncovered = rids - exposed

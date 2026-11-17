@@ -226,7 +226,11 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   `umask(0)` masking disabled), browser storage of security-sensitive
   values (tokens/sessions/credentials written to `localStorage`/
   `sessionStorage` via `setItem`, bracket-key or dot-key assignment —
-  readable by any injected script, vs. httpOnly cookies).
+  readable by any injected script, vs. httpOnly cookies), client-side
+  `document.cookie` writes of security values (tokens/sessions/credentials
+  written via `=`/`+=` — such cookies can never be httpOnly, so XSS reads the
+  bearer material straight off the cookie object, vs. server-side httpOnly
+  cookies).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
