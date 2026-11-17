@@ -2781,6 +2781,68 @@ def test_java4xx_literal_constant_or_non_header_sinks_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R065-java4xx"], issues
 
 
+def test_javacrypto_weak_algorithm_getinstance_flagged():
+    """R066-javacrypto fires when a JCA getInstance call on a cryptographic
+    receiver picks a weak/legacy algorithm from a literal — MD5, SHA-1,
+    DES, DESede, RC4/ARC4/ARCFOUR, SHA1PRNG, ECB mode or a PBEWith*
+    combination built on one of them (CWE-327)."""
+    src = (
+        'MessageDigest md = MessageDigest.getInstance("MD5");\n'
+        'MessageDigest md = MessageDigest.getInstance("SHA-1");\n'
+        'MessageDigest msg = MessageDigest.getInstance("SHA1");\n'
+        'Cipher cipher = Cipher.getInstance("DES/ECB/PKCS5Padding");\n'
+        'Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");\n'
+        'Cipher c = Cipher.getInstance("DESede/CBC/PKCS5Padding");\n'
+        'SecretKeyFactory f = SecretKeyFactory.getInstance("PBEWithMD5AndDES");\n'
+        'KeyGenerator kg = KeyGenerator.getInstance("RC4");\n'
+        'Mac mac = Mac.getInstance("HmacMD5");\n'
+        'Signature sig = Signature.getInstance("MD5withRSA");\n'
+        'Signature sig = Signature.getInstance("SHA1withRSA");\n'
+        'SecureRandom sr = SecureRandom.getInstance("SHA1PRNG");\n'
+        'Mac mac = Mac.getInstance("HmacSHA1");\n'
+        'SecretKeyFactory f = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1");\n'
+        'Cipher cipher = Cipher.getInstance("DES");\n'
+        'KeyGenerator kg = KeyGenerator.getInstance("ARCFOUR");\n'
+        'MessageDigest.getInstance("md5");\n'
+        'MessageDigest md = MessageDigest.getInstance("MD5");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R066-javacrypto"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javacrypto_safe_algorithm_or_nonliteral_getinstance_stays_quiet():
+    """R066-javacrypto stays quiet for modern algorithms (SHA-256/384/512,
+    SHA3-*, AES non-ECB modes, PBKDF2WithHmacSHA256, PBEWithHmacSHA256AndAES_256,
+    HmacSHA256, SHA256withRSA / SHA384withRSA), non-literal first arguments
+    and non-getInstance contexts — no weak algorithm is selected."""
+    src = (
+        'MessageDigest md = MessageDigest.getInstance("SHA-256");\n'
+        'MessageDigest md = MessageDigest.getInstance("SHA-384");\n'
+        'MessageDigest md = MessageDigest.getInstance("SHA-512");\n'
+        'MessageDigest md = MessageDigest.getInstance("SHA3-256");\n'
+        'Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");\n'
+        'Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");\n'
+        'Cipher cipher = Cipher.getInstance("AES/OFB/NoPadding");\n'
+        'SecretKeyFactory f = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");\n'
+        'SecretKeyFactory f = SecretKeyFactory.getInstance("PBEWithHmacSHA256AndAES_256");\n'
+        'Mac mac = Mac.getInstance("HmacSHA256");\n'
+        'Signature sig = Signature.getInstance("SHA256withRSA");\n'
+        'Signature sig = Signature.getInstance("SHA384withRSA");\n'
+        'MessageDigest md = MessageDigest.getInstance(algorithmName);\n'
+        'Cipher cipher = Cipher.getInstance(configuredAlgo);\n'
+        'SecureRandom sr = SecureRandom.getInstanceStrong();\n'
+        'byte[] buf = Cipher.getInstance("AES").doFinal(data);\n'
+        'MessageDigest sha256 = MessageDigest.getInstance("SHA-256");\n'
+        'String algo = "MD5";\n'
+        'BigInteger two = BigInteger.valueOf(2);\n'
+        'MessageDigest md = MessageDigest.getInstance("SHA-512", "BC");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R066-javacrypto"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2971,6 +3033,7 @@ def test_every_rule_has_test_exposure():
         "R063-javapath",
         "R064-javareflect",
         "R065-java4xx",
+        "R066-javacrypto",
     }
     assert exposed <= rids
     uncovered = rids - exposed

@@ -425,7 +425,19 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   (`setStatus`, `sendError`, `setContentType`, `setIntHeader("X-Limit", 100)`),
   header READS (`response.getHeader(...)`), non-response receivers
   (`wrapper.setHeader(...)`) and the `"Location"` header name
-  (owned by the open-redirect rule R060) stay quiet).
+  (owned by the open-redirect rule R060) stay quiet), and Java JCA weak
+  cryptography
+  (`MessageDigest`/`Cipher`/`SecretKeyFactory`/`KeyGenerator`/`Mac`/
+  `AlgorithmParameterGenerator`/`Signature`/`SecureRandom`
+  `.getInstance("<literal>")` whose algorithm literal is MD5, SHA-1/SHA1/SHA_1,
+  DES/DESede/3DES/TripleDES, RC4/ARC4/ARCFOUR, SHA1PRNG, an ECB block mode
+  (`AES/ECB/...`, `DES/ECB/...`) or a `PBEWith*` scheme built on one of those
+  — broken hashes/MACs/signatures, legacy ciphers and raw ECB leak structure
+  and enable collision, keystream-bias or block-reordering attacks — CWE-327;
+  modern algorithms (SHA-256/384/512, SHA3-*, AES/GCM, AES/CBC, AES/OFB,
+  PBKDF2WithHmacSHA256, PBEWithHmacSHA256AndAES_256, HmacSHA256,
+  SHA256withRSA, SHA384withRSA), non-literal `getInstance(variable)` and
+  `getInstanceStrong()` stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

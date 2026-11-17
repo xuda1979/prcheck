@@ -1879,6 +1879,57 @@ _RULE_TUPLES = [
         r")",
         "A Java HTTP response header is written from client-controlled input — CWE-113 CRLF injection / response splitting. response.setHeader / addHeader / setIntHeader / setDateHeader on the HttpServletResponse with a request accessor as the header NAME (the attacker picks security-critical headers like Set-Cookie or CSP to override) or a request-derived, concatenated or bare-variable VALUE: an embedded CR/LF terminates the header early and the attacker can inject additional headers, set cookies or split the response body, undoing transport/security controls the app expects to set. Sanitize or validate any value before writing it (strip CR/LF, allowlist characters), never let the client select the header name, and set integrity headers (CSP, X-Content-Type-Options, HSTS) from server config only; treat 'Location' (redirect target — R060) separately",
     ),
+    (
+        "R066-javacrypto",
+        "security",
+        "high",
+        "Java JCA getInstance literal selecting a weak or legacy algorithm (MD5, SHA-1, DES, DESede, RC4, SHA1PRNG, ECB mode): MessageDigest / Cipher / SecretKeyFactory / KeyGenerator / Mac / Signature / SecureRandom (CWE-327)",
+        # CWE-327 (Use of a Broken or Risky Cryptographic Algorithm):
+        # JCA algorithm selection through the FIRST quoted argument of
+        # Class.getInstance("...") on a cryptographic receiver —
+        # MessageDigest, Cipher, SecretKeyFactory, KeyGenerator, Mac,
+        # AlgorithmParameterGenerator, Signature or SecureRandom.  A literal
+        # naming a weak/legacy algorithm is flagged:
+        #   MD5 (any case) — MessageDigest, "MD5withRSA" signatures,
+        #     "HmacMD5" MACs, PBEWith*DES combos, PBKDF2WithHmacSHA1,
+        #     the SecureRandom "MD5" self-seeding variants; deprecated/CFRG
+        #     years in the recommendation track.
+        #   SHA-1 / SHA1 / SHA_1 — broken since SHAttered (2017) for
+        #     collision resistance; HmacSHA1 / SHA1withRSA / SHA1PRNG /
+        #     PBKDF2WithHmacSHA1 all flagged.
+        #   DES / DESede / 3DES / TripleDES — 56-bit key space (DES),
+        #     meet-in-the-middle on EDE (3DES); only cipher-suite context.
+        #   RC4 / ARC4 / ARCFOUR — broken keystream biases.
+        #   SHA1PRNG — SecureRandom algorithm whose seed strength is
+        #     implementation-dependent and historically weak.
+        #   /ECB/ mode (ECB surrounded by '/' or ',') — leaks block
+        #     structure (EBC penguin) for any cipher.
+        #   PBEWith* whose inner cipher/hash is one of the weak set.
+        # JCA names are case-sensitive; the common names are accepted in
+        # both cases via char classes, no inline flag (R053-R065
+        # convention).  The scan is anchored to the opening quote, so a
+        # non-literal first argument (getInstance(variable)) and a
+        # variable-derived literal stay quiet; a literal algorithm name
+        # must contain the weak token to fire.  Safe algorithms stay quiet:
+        # SHA-256/384/512, SHA3-*, AES/GCM or any AES mode without ECM,
+        # PBKDF2WithHmacSHA256, PBEWithHmacSHA256AndAES_256, HmacSHA256,
+        # SHA256withRSA / SHA384withRSA, RSA PKCS1.  Single-line contract.
+        r"\b(?:MessageDigest|Cipher|SecretKeyFactory|KeyGenerator|Mac|"
+        r"AlgorithmParameterGenerator|Signature|SecureRandom)\s*\.\s*"
+        r"getInstance\s*\(\s*['\"]"
+        r"(?=[^'\"]*?(?:"
+        r"[mM][dD]5"
+        r"|[sS][hH][aA][-_]?1"
+        r"|DESede"
+        r"|DES(?!\w)"
+        r"|RC4|ARC4|ARCFOUR"
+        r"|SHA1PRNG"
+        r"|[/,]ECB[/,]"
+        r"|PBEWith[^'\"]*?(?:[mM][dD]5|DESede|DES(?!\w)|3DES|TripleDES|RC4|ARC4|ECB)"
+        r"))"
+        r"[^'\"]*['\"]",
+        "A Java JCA getInstance call picks a broken or legacy algorithm from a literal — CWE-327. MD5 and SHA-1 (also as HmacMD5/HmacSHA1, MD5withRSA/SHA1withRSA, PBKDF2WithHmacSHA1, SHA1PRNG) are cryptographically broken, DES/DESede/3DES and RC4/ARC4/ARCFOUR are legacy ciphers with known weaknesses, and ECB mode leaks plaintext block structure: an attacker observing ciphertext can strip/reorder blocks or exploit collision or keystream biases to forge MACs or signatures. Require an actual security review of any MD5/SHA-1/RC4/DES/3DES/ECB usage; for hashing reference integrity primitives like SHA-256 or HMAC-SHA-256, AEAD schemes like AES/GCM for encryption, PBKDF2WithHmacSHA256 / Argon2 for key derivation, and SHA256withRSA / Ed25519 for signatures — and keep algorithm names in server-side configuration, never in unattended code",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
