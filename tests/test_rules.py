@@ -988,6 +988,52 @@ def test_regex_injection_literal_and_safe_patterns_quiet():
     assert not [i for i in issues if i.rule_id == "R034-redos"], issues
 
 
+def test_response_header_injection_request_values_flagged():
+    """R035-hdrinj flags request-derived values written into response headers via
+    Python subscript-assign, Python set_header/add_header/set_cookie calls, and
+    Node/JS res.setHeader/header/append/set/cookie/writeHead and
+    xhr.setRequestHeader sinks (CWE-113)."""
+    src = (
+        "response.headers['X-Request-ID'] = request.headers.get('X-Request-ID')\n"
+        "resp['X-Trace'] = req.query.trace\n"
+        "res.headers['Content-Disposition'] = request.args.get('download')\n"
+        "response.set_header('X-Custom', request.headers.get('origin'))\n"
+        "resp.add_header(request.json['name'], 'x')\n"
+        "set_cookie('session', request.cookies.get('next'))\n"
+        "res.setHeader('X-Powered-By', request.query.name)\n"
+        "res.append('Set-Cookie', req.query.val)\n"
+        "res.cookie('auth', request.body.token)\n"
+        "res.writeHead(200, { 'X-Custom': request.query.v })\n"
+        "xhr.setRequestHeader('Authorization', request.body.tok)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R035-hdrinj"]
+    assert [i.line for i in hits] == list(range(1, 12)), f"R035-hdrinj mismatch: {hits}"
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_response_header_injection_literal_and_generic_quiet():
+    """R035-hdrinj must not fire on literal headers/static values, generic dict
+    writes, .headers reads, helper receivers, or non-header setters."""
+    src = (
+        "response.headers['Content-Type'] = 'application/json'\n"
+        "res.setHeader('Content-Type', 'application/json')\n"
+        "response.set_header('X', 'static')\n"
+        "response.headers['X'] = API_KEY\n"
+        "self.headers['X'] = request.headers.get('Y')\n"
+        "cache['X'] = request.query.v\n"
+        "session['user'] = request.body.user\n"
+        "os.environ['PATH'] = request.body.path\n"
+        "headers['X'] = request.query.v\n"
+        "res.headers.get('X-Rate-Limit')\n"
+        "res.send(request.query.msg)\n"
+        "auth.set_cookie(request.body.uid)\n"
+        "res2.setHeader('X', request.query.v)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R035-hdrinj"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1155,7 +1201,7 @@ def test_every_rule_has_test_exposure():
         "R022-ssti", "R023-xxe", "R024-jwt", "R025-pw", "R026-upload",
         "R027-massassig", "R028-nosql", "R029-ldap", "R030-xpath",
         "R031-ssrf-js", "R032-cmd-node", "R033-protopoll",
-        "R034-redos",
+        "R034-redos", "R035-hdrinj",
     }
     assert exposed <= rids
     uncovered = rids - exposed

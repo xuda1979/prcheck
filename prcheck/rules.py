@@ -793,6 +793,57 @@ _RULE_TUPLES = [
         r")",
         "A Python re-module call (compile/search/match/fullmatch/split/findall/finditer/sub/subn) compiles a request-derived first argument as the pattern, or a JS RegExp constructor is built from a request-derived pattern — user-controlled regexes can cause catastrophic backtracking or denial of service (regex injection/ReDoS/CWE-1333)",
     ),
+    (
+        "R035-hdrinj",
+        "security",
+        "high",
+        "HTTP response header injection: a request-derived value is written into a response header",
+        # Fires on a single added line when (CWE-113):
+        #   (A) Python subscript-assign on a header-ish object —
+        #       response.headers['X-Foo'] = req.query.v / resp['X-Trace'] =
+        #       request.headers.get(...) / res.headers['K'] = … — the object is
+        #       exactly a response/resp/res variable (directly subscripted) or a
+        #       `.headers` attribute on one, and the VALUE after `=` is
+        #       request-derived (req/request/ctx/event accessor -> .field /
+        #       ['field'] / ?.field).
+        #   (B) Python call sinks — response.set_header / response.add_header /
+        #       response.set_cookie, plus bare set_cookie / add_header /
+        #       set_header — with a request-derived argument (header NAME or
+        #       VALUE) in the call.
+        #   (C) Node/JS sinks — res.setHeader / res.header / res.append /
+        #       res.set / res.cookie / res.writeHead / xhr.setRequestHeader —
+        #       with a request-derived argument anywhere in the argument list.
+        # A request-derived payload is required (no bare-variable heuristic) so
+        # literal headers ("Content-Type: application/json", 'X': 'static'),
+        # .headers READS (res.headers.get(...)), generic dict writes
+        # (cache['X'] = req... / session['user'] = ... / self.headers[...] /
+        # os.environ[...]), helper receivers (auth.set_cookie) and non-header
+        # setters (res.send / res.json / response.write) stay quiet.
+        r"(?i)(?:"
+        # (A) Python subscript-assign on a header-ish object: object is exactly a
+        #     response/resp/res variable (directly subscripted) or a `.headers`
+        #     attribute on one — then a key, `=`, and a request-derived VALUE.
+        r"(?:(?:[\w.\]'\"\\]+\s*)?(?:response|resp|res)\s*\.\s*headers"
+        r"|(?:response|resp|res))"
+        r"\s*\[[^\]\n]*\]\s*=\s*"
+        r"(?=[^\n]*\b(?:req|request|ctx|event)\b\s*(?:\?\.|\.|\[))"
+        r"|"
+        # (B) Python call sinks.  response.set_header / response.add_header /
+        #     response.set_cookie and bare set_cookie / add_header / set_header
+        #     calls, each requiring a request-derived argument (name or value).
+        r"(?:\b(?:response|resp|res)\s*\.\s*(?:(?:set|add)_?header|set_cookie)\s*\("
+        r"|(?<![A-Za-z0-9_.])(?:set_cookie|add_header|set_header)\s*\()"
+        r"(?=[^\n]*\b(?:req|request|ctx|event)\b\s*(?:\?\.|\.|\[))"
+        r"|"
+        # (C) Node/JS sinks — res.setHeader / res.header / res.append / res.set /
+        #     res.cookie / res.writeHead / xhr.setRequestHeader — with a
+        #     request-derived argument anywhere in the argument list.
+        r"\b(?:res|xhr)\s*\.\s*(?:setHeader|header|append|set|cookie|writeHead|"
+        r"setRequestHeader)\s*\("
+        r"(?=[^\n]*\b(?:req|request|ctx|event)\b\s*(?:\?\.|\.|\[))"
+        r")",
+        "A request-derived value is written into an HTTP response header via a header-setting sink — response.headers/resp[] subscript-assign or set_header/add_header/set_cookie in Python, res.setHeader/header/append/set/cookie/writeHead or xhr.setRequestHeader in Node — an attacker can inject CRLF to smuggle headers or split responses (HTTP response header injection/CWE-113)",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

@@ -198,7 +198,11 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   `extend` fed request-derived objects, or direct `__proto__` assignment of
   request input), regex injection / ReDoS (Python `re.*` sinks
   compile a request-derived pattern as their first argument, or a JS
-  `RegExp` constructor is built from request input).
+  `RegExp` constructor is built from request input), HTTP response header
+  injection (request-derived values written via Python
+  `response.headers[]`/`resp[]` subscript-assign or
+  `set_header`/`add_header`/`set_cookie`, or Node `res.setHeader`/`header`/
+  `append`/`set`/`cookie`/`writeHead` and XHR `setRequestHeader`).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
