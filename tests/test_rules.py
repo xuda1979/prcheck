@@ -2462,6 +2462,70 @@ def test_openredir_literal_constant_or_non_redirect_targets_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R060-openredir"], issues
 
 
+def test_ldapjndi_concat_or_request_derived_search_flagged():
+    """R061-ldapjndi fires when a Java LDAP / Spring LDAP search sink —
+    JNDI InitialDirContext/DirContext/LdapContext-family receiver .search
+    or Spring LdapTemplate.search / searchForObject / searchForContext — is
+    fed a concatenated, request-derived or builder-chain filter/base
+    (CWE-90: LDAP ANDs attacker terms like ')(objectClass=*)' into the filter,
+    bypassing auth or reading sibling entries)."""
+    src = (
+        'ctx.search("ou=people", "(uid=" + username + ")");\n'
+        'dirContext.search(BASE, "(cn=" + cn + ")");\n'
+        'initialDirContext.search(b, "(mail=" + email + ")");\n'
+        'ldapContext.search(base, "(uid=" + login + ")");\n'
+        'ldapTemplate.search("", "(uid=" + uid + ")", LdapNameMapper.class);\n'
+        'ctx.search("ou=people", request.getParameter("filter"));\n'
+        'ldapTemplate.search(base, req.getHeader("filter"));\n'
+        'ctx.search(req.getParameter("base"), "(uid=*)");\n'
+        'dirContext.search(base, sb.toString());\n'
+        'ldapTemplate.searchForObject(base, "(uid=" + user + ")", User.class);\n'
+        'ctx.search(base, bf.append("(").append("uid=").toString());\n'
+        'ldapTemplate.search("", "(uid=" + request.getParameter("u") + ")", mapper);\n'
+        'ctx.search("dc=x", "(cn=" + displayName + ")");\n'
+        'dirContext.search(BASE, builder.build());\n'
+        'ldapTemplate.searchForContext(base, "(cn=" + q + ")");\n'
+        'ldapContext.search(base, sb2.append("(uid=").append(user).append(")").toString());\n'
+        'ldapTemplate.search(b, request.getHeader("X-Filter"));\n'
+        'ctx.search(base, stringBuilder.append("(uid=").append(uid).append(")").toString());\n'
+        'dirContext.search(BASE, "(mail=" + getEmail() + ")");\n'
+        'ldapTemplate.search("", "(uid=" + login + ")", new UserMapper());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R061-ldapjndi"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_ldapjndi_literal_constant_or_non_search_targets_stay_quiet():
+    """R061-ldapjndi stays quiet for fully literal filters, SCREAMING_SNAKE
+    constants, bare String variables, ALL_CAPS concat operands, in-string
+    arithmetic, non-search LDAP operations and non-LDAP receivers — no fused
+    LDAP search sink receives string-built input."""
+    src = (
+        'ctx.search("ou=people", "(uid=admin)");\n'
+        'dirContext.search(BASE, USER_FILTER);\n'
+        'ctx.search(base, filter);\n'
+        'Context ctx = new InitialDirContext(env);\n'
+        'ctx.search(BASE, BASE + FILTER);\n'
+        'ctx.search(base, "(uid=" + USER_ID + ")");\n'
+        'attrs.put("memberOf", "cn=admin");\n'
+        'ctx.createSubcontext("ou=managers");\n'
+        'ctx.close();\n'
+        'String filter = request.getParameter("u");\n'
+        'ldapTemplate.authenticate(DN, "(uid=" + creds + ")");\n'
+        're.search("(uid=.*)", s);\n'
+        'table.search(criteria.getFilter());\n'
+        'ldapTemplate.search(DN, SQL_FILTER, mapper);\n'
+        'ctx.search(base, "(uid=" + (a + b) + ")");\n'
+        'query.search("(uid=" + uk + ")");\n'
+        'ctx.lookup("cn=admin");\n'
+        'ldapTemplate.lookup("ou=people");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R061-ldapjndi"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2647,6 +2711,7 @@ def test_every_rule_has_test_exposure():
         "R058-jdbcsqli",
         "R059-xpathjava",
         "R060-openredir",
+        "R061-ldapjndi",
     }
     assert exposed <= rids
     uncovered = rids - exposed

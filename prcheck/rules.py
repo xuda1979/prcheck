@@ -1678,6 +1678,37 @@ _RULE_TUPLES = [
         r")",
         "A Java redirect sink fed a concatenated or request-derived URL — CWE-601 open redirect. HttpServletResponse.sendRedirect, response.setHeader(\"Location\", ...), Spring RedirectView / redirectView.setUrl and ModelAndView \"redirect:\" views send the browser to the target: server-side concatenation of a parameter/field value, an unbounded sink-context bare identifier (dest/target/nextUrl), a request accessor result (getParameter/getHeader/getRequestURI) or a builder/.toString() chain lets an attacker pick where victims land after login/logout — used to launder phishing links past scanners. Validate that the target is a same-origin relative path (starts with '/') or an allow-listed scheme+host before redirecting; never reflect request input into the Location",
     ),
+    (
+        "R061-ldapjndi",
+        "security",
+        "high",
+        "Java LDAP / Spring LDAP search filter or base dn built from client-controlled input",
+        # CWE-90 (Improper Neutralization of Special Elements used in an
+        # LDAP Query): JNDI DirContext-family search — InitialDirContext/
+        # InitialLdapContext/DirContext/LdapContext receiver .search(
+        # baseDn, filter, ...) and Spring LdapTemplate.search /
+        # searchForObject / searchForContext — hand the (base, filter)
+        # pair to the LDAP server, which ANDs a user-supplied filter like
+        # (uid=*) against the base.  A filter or base assembled with '+'
+        # concatenation of a lowercase identifier (request parameter,
+        # login/username/uid field), a request accessor result
+        # (getParameter/getHeader/getQueryString) or a builder/.toString()
+        # chain lets an attacker inject filter metacharacters — a closing
+        # ')' plus (objectClass=*) or (& msg — to bypass authentication and
+        # read entries outside the intended subtree.  Fully-literal
+        # filters, SCREAMING_SNAKE constants, bare String variables, ALL_CAPS
+        # concat operands ("(uid=" + USER_ID + ")"), in-string arithmetic,
+        # non-search LDAP ops (authenticate, createSubcontext, close) and
+        # non-LDAP receivers (table.search, query.search, re.search) stay
+        # quiet.  Java sources are case-sensitive CamelCase, so no inline
+        # flag (same convention as R053-R060).  Single-line contract.
+        r"(?:"
+        r"\b(?:ctx|ctxt|context|dirCtx|dirContext|ldapContext|initialDirContext|ldapTemplate|ldap)\w*\s*\.\s*(?:search|searchForObject|searchForContext)\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\b(?:ctx|ctxt|context|dirCtx|dirContext|ldapContext|initialDirContext|ldapTemplate|ldap)\w*\s*\.\s*(?:search|searchForObject|searchForContext)\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString)\s*\("
+        r"|\b(?:ctx|ctxt|context|dirCtx|dirContext|ldapContext|initialDirContext|ldapTemplate|ldap)\w*\s*\.\s*(?:search|searchForObject|searchForContext)\s*\([^;\n]*[a-z_]\w*\s*\.\s*(?:append|build|toString)\s*\("
+        r")",
+        "A Java LDAP / Spring LDAP search fed a concatenated or request-derived filter or base — CWE-90 LDAP injection. JNDI DirContext-family ctx/dirContext/ldapContext/initialDirContext .search and Spring LdapTemplate.search/searchForObject/searchForContext send the (base, filter) pair to the server: request input concatenated with '+' or a builder/.toString() chain crosses into the filter expression, so an attacker can inject ')(objectClass=*)' tautologies or '(uid=*)' wildcards to bypass auth or read sibling entries — LDAP treats the filter as an AND of expression terms and never encodes it. Escape / filter special characters (\\ * ( ) NUL) and use whitelisted attribute values or Spring's FilterCriteraBuilder/EqualsFilter for every user-derived term; never concatenate request input into the filter or base dn",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

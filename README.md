@@ -354,7 +354,19 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   constants, bare String variables, ALL_CAPS concat operands, status-only
   responses (`setStatus`/`sendError`), dispatcher forwards
   (`getRequestDispatcher`), `request.getContextPath()` concat and
-  non-redirect headers (`Cache-Control`) stay quiet).
+  non-redirect headers (`Cache-Control`) stay quiet), Java LDAP / Spring
+  LDAP injection
+  (`InitialDirContext`/`DirContext`/`LdapContext`-family receiver `.search`
+  and Spring `LdapTemplate.search` / `searchForObject` / `searchForContext`
+  fed a `'...' + lowercaseIdentifier` literal-concatenated filter/base, a
+  `request.*` accessor (`getParameter`/`getHeader`/`getQueryString`), or a
+  builder/`.toString()` chain — the LDAP server ANDs attacker terms like
+  `)(objectClass=*)` into the filter, bypassing authentication or reading
+  sibling entries — CWE-90; fully-literal filters, SCREAMING_SNAKE
+  constants, bare String variables, ALL_CAPS concat operands, in-string
+  arithmetic, non-search LDAP ops (`authenticate`/`createSubcontext`/
+  `close`/`lookup`) and non-LDAP receivers (`table.search`, `query.search`,
+  `re.search`) stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
