@@ -1602,6 +1602,45 @@ _RULE_TUPLES = [
         r")",
         "A JDBC / Spring JdbcTemplate SQL sink fed a concatenated or request-derived query string — CWE-89 SQL injection. Statement.execute*, Connection.prepareStatement and JdbcTemplate.query/update/execute hand the string to the driver: request input concatenated with '+' or a builder/.toString() chain crosses into the DB, so an attacker can inject OR/UNION fragments, comment out the remainder, or stack statements (categoryA; DROP TABLE…). Use parameterized SQL — PreparedStatement with ? binds, JdbcTemplate query(sql, params, mapper) / named parameters (:name) — and keep every query fragment a fixed server-side constant; never concatenate user input into the SQL text",
     ),
+    (
+        "R059-xpathjava",
+        "security",
+        "high",
+        "Java XPath expression built by string concatenation or fed request-derived input",
+        # CWE-643 (Improper Neutralization of Data within XPath
+        # Expressions): javax.xml.xpath XPathFactory.newInstance().newXPath()
+        # .evaluate/compile, an xpath/xp-named receiver's evaluate/compile
+        # and DOM4J document.selectNodes/selectSingleNode compile the query
+        # string and walk the parsed XML document — a predicate assembled
+        # with '+' concatenation of a lowercase identifier (request
+        # parameter, DTO field, builder variable) or passed a method-chain
+        # argument (sb.toString(), request.getParameter/getHeader/
+        # getQueryString) lets an attacker smuggle boolean tautologies
+        # (' or '1'='1), comment out the rest of the predicate, or read
+        # sibling nodes outside the intended subtree.  Literal quoted
+        # expressions, SCREAMING_SNAKE constants, bare String variables
+        # (query/URLSearchParams-style) and ALL_CAPS concat operands stay
+        # quiet, as do non-sink XPath construction (factory/newXPath alone),
+        # variable-resolution setup, DOM traversal (getElementsByTagName),
+        # Selenium By.xpath staged objects and Saxon/Ruby-style receivers
+        # without an evaluate.  Java sources are case-sensitive CamelCase,
+        # so no inline flag (same convention as R053-R058).  Single-line
+        # contract.
+        r"(?:"
+        r"\bXPathFactory\s*\.\s*newInstance\s*\(\s*\)\s*\.\s*newXPath\s*\(\s*\)\s*\.\s*(?:evaluate|compile|evaluateExpression)"
+        r"\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\bXPathFactory\s*\.\s*newInstance\s*\(\s*\)\s*\.\s*newXPath\s*\(\s*\)\s*\.\s*(?:evaluate|compile|evaluateExpression)"
+        r"\s*\(\s*(?:request|req)\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getRequestURL)\s*\("
+        r"|\bXPathFactory\s*\.\s*newInstance\s*\(\s*\)\s*\.\s*newXPath\s*\(\s*\)\s*\.\s*(?:evaluate|compile|evaluateExpression)"
+        r"\s*\(\s*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\("
+        r"|\b(?:xpath|xp)[A-Za-z0-9_]*\s*\.\s*(?:evaluate|compile|evaluateExpression)\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\b(?:xpath|xp)[A-Za-z0-9_]*\s*\.\s*(?:evaluate|compile|evaluateExpression)\s*\(\s*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getRequestURL)\s*\("
+        r"|\b(?:xpath|xp)[A-Za-z0-9_]*\s*\.\s*(?:evaluate|compile|evaluateExpression)\s*\(\s*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\("
+        r"|\b(?:document|doc|root)\s*\.\s*(?:selectNodes|selectSingleNode)\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\b(?:document|doc|root)\s*\.\s*(?:selectNodes|selectSingleNode)\s*\(\s*(?:request|req)\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\("
+        r")",
+        "A Java XPath sink fed a concatenated or request-derived expression — CWE-643 XPath injection. XPathFactory.newInstance().newXPath().evaluate/compile, xpath/xp-named receivers and DOM4J document.selectNodes/selectSingleNode compile the query and run it against the parsed document: a predicate built with '+' concatenation or sb.toString() lets an attacker inject boolean tautologies (' or '1'='1) or wildcard child selects to read sibling/root nodes the app did not authorize. Build XPath predicates only from validated static fragments and parameterize/bind variables; whitelist the expression shape and never concatenate request input into the query string",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

@@ -2332,6 +2332,74 @@ def test_jdbcsqli_literal_parameterized_or_other_targets_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R058-jdbcsqli"], issues
 
 
+def test_xpathjava_concat_or_request_derived_expression_flagged():
+    """R059-xpathjava fires when a Java XPath sink — javax.xml.xpath
+    XPathFactory.newInstance().newXPath().evaluate/compile/evaluateExpression,
+    an xpath/xp-named receiver, or DOM4J document.selectNodes/
+    selectSingleNode — is fed a concatenated, request-derived or builder-chain
+    expression (CWE-643: the predicate crosses into the XPath engine, so
+    request input can inject boolean tautologies or read sibling nodes)."""
+    src = (
+        'XPathExpression expr = XPathFactory.newInstance().newXPath().compile("/users/user[name=\'" + name + "\']");\n'
+        'XPathExpression expr = xpath.compile("/orders/order[id=" + orderId + "]");\n'
+        'String value = xpath.evaluate("/users/user[name=\'" + creds + "\']", doc);\n'
+        'String value = xpath.evaluate(request.getParameter("q"), doc);\n'
+        'String r = XPathFactory.newInstance().newXPath().evaluate("//item[price>" + price + "]", doc);\n'
+        'String r = xpath.evaluate(qb.toString(), doc);\n'
+        'String r = xp.evaluate("/root[@n=\'" + attr + "\']", source);\n'
+        'String r = xpath.evaluate("/users/" + req.getParameter("u"), doc);\n'
+        'XPathExpression ex = xpath.compile("/x[@v=\'" + user + "\']");\n'
+        'String r = xpathEvaluator.evaluate("//node[@" + key + "=" + val + "]", input);\n'
+        'String v = XPathFactory.newInstance().newXPath().evaluate("/r/" + path, doc);\n'
+        'NodeList list = document.selectNodes("/users/user[name=\'" + login + "\']");\n'
+        'Node n = doc.selectSingleNode("//item[id=" + itemId + "]");\n'
+        'Object v = xpath.compile("string(//user[" + cond + "])");\n'
+        'String o = xp.evaluate(bb.toString(), src);\n'
+        'String v = root.selectNodes("/users/user[name=\'" + getUserInput() + "\']").size() > 0 ? "y" : "n";\n'
+        'String v = xpath.evaluate(req.getQueryString(), doc);\n'
+        'String v = XPathFactory.newInstance().newXPath().evaluate(sb.toString(), doc);\n'
+        'String v = document.selectNodes("/x[@y=\'" + request.getParameter("y") + "\']").get(0).getText();\n'
+        'String o = xpath.evaluate("/users/" + request.getUserPrincipal().getName(), doc);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R059-xpathjava"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_xpathjava_literal_constant_or_non_sink_targets_stay_quiet():
+    """R059-xpathjava stays quiet for fully literal expressions,
+    SCREAMING_SNAKE constants, bare String variables, ALL_CAPS concat
+    operands, in-string arithmetic, XPath construction / variable-resolution
+    without a sink call, DOM traversal, Selenium By.xpath staging and
+    non-XPath receivers — no fused Java XPath sink receives string-built
+    input."""
+    src = (
+        "String value = xpath.evaluate(\"/users/user[name='admin']\", doc);\n"
+        "String value = xpath.evaluate(USER_XPATH, doc);\n"
+        "String value = xpath.evaluate(query, doc);\n"
+        "XPathFactory.newInstance().newXPath();\n"
+        "xpath.setXPathVariableResolver(v);\n"
+        'String r = xpath.evaluate("/users" + PATH_SUFFIX, doc);\n'
+        "String r = xpath.evaluate(\"/users/user[name='\" + NAME + \"']\", doc);\n"
+        'String r = doc.getElementsByTagName("item").item(0).getTextContent();\n'
+        "SAXBuilder sb = new SAXBuilder();\n"
+        'Node node = driver.findElement(By.xpath("//div").getNode());\n'
+        "String r = xpath.evaluate(doc);\n"
+        'String r = xpath.evaluate("/a" + "/b", doc);\n'
+        "String value = xpath.compile(QUERY_CONST).evaluate(doc);\n"
+        "Document doc = dbFactory.newDocumentBuilder().parse(xmlFile);\n"
+        'String r = xpath.evaluate("/x[@v=\'" + (String) input + "\']", source);\n'
+        'String r = xp.evaluateExpression("/users/user[@id=1]");\n'
+        'String r = xpath.evaluate("/n" + (a + b), doc);\n'
+        'String v = xpath.evaluate("/users", null);\n'
+        "String r = query.evaluate(doc);\n"
+        "String r = expression.evaluate(doc);\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R059-xpathjava"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2515,6 +2583,7 @@ def test_every_rule_has_test_exposure():
         "R056-jpaqli",
         "R057-ssrf",
         "R058-jdbcsqli",
+        "R059-xpathjava",
     }
     assert exposed <= rids
     uncovered = rids - exposed

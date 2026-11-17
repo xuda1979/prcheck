@@ -328,7 +328,20 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   ALL_CAPS concat operands, no-arg `execute()` / bare `Statement`
   objects, `setString` binding, in-string arithmetic, non-query string
   building, `JdbcTemplate.execute(connection -> ...)` lambda receivers
-  and custom receiver names stay quiet).
+  and custom receiver names stay quiet), Java XPath injection
+  (`XPathFactory.newInstance().newXPath().evaluate` / `compile` /
+  `evaluateExpression`, `xpath`/`xp`-named receiver `.evaluate` /
+  `.compile`, and DOM4J `document.selectNodes` / `selectSingleNode` fed a
+  `'...' + lowercaseIdentifier` literal-concatenated expression, a bare
+  `request.*` accessor, or a builder/`.toString()` chain
+  (`sb.toString()`, `qb.toString()`) — the predicate crosses to the XPath
+  engine so request input can inject boolean tautologies
+  (`' or '1'='1`) or read sibling/root nodes — CWE-643; fully-literal
+  expressions, SCREAMING_SNAKE constants, bare String variables,
+  ALL_CAPS concat operands, in-string arithmetic, XPath construction /
+  variable-resolution without a sink call, DOM traversal
+  (`getElementsByTagName`), staged `By.xpath` objects and non-XPath
+  receiver names stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
