@@ -934,6 +934,66 @@ _RULE_TUPLES = [
         r")",
         "A world-writable permission (chmod 0o777/0o666/0o1777, makedirs/mkdir mode=…, quoted chmod '777') or a disabled umask allows any local user to read/modify the file — restrict to owner-only (0o600/0o700) and keep a restrictive umask (e.g. 0o022/0o077); avoid setuid/setgid bits on world-writable files (insecure permissions/CWE-732)",
     ),
+    (
+        "R039-nav",
+        "security",
+        "high",
+        "Client-side navigation to a dynamic or executable-scheme URL (DOM XSS / open redirect)",
+        # Fires on a single added line when a navigation sink is fed an unsafe
+        # URL (CWE-79/CWE-601):
+        #   (A) an executable-scheme literal — javascript: or html-capable
+        #       data:text/html / data:application/xhtml — reaches a navigation
+        #       sink: window.open(...), location.assign/replace(...),
+        #       location/window.location/document.location (.href) assignment,
+        #       jQuery .attr('href', ...), or a generic element .href =. The
+        #       argument scan is bounded ([^;\n]* / [^)\n]*) so a scheme
+        #       literal in an unrelated later statement stays quiet; static
+        #       literals (/login, https://…) and location.hash/reload stay
+        #       quiet.
+        #   (B) a request/URL-search-derived URL reaches a navigation sink —
+        #       after the non-literal-arg guard (?!['\"]), the statement (up to
+        #       ';') carries an attacker-facing source: request/req/ctx/event
+        #       accessor, searchParams.get(...), or location.search.
+        #   (C) a url-named variable (url/uri/link/endpoint/target/callback/
+        #       webhook, case-insensitive like the JS-facing R031 so returnUrl
+        #       fires) is fed to a navigation sink; the scoped lowercase
+        #       lookahead rejects SCREAMING_CASE constants (API_URL/BASE_URL).
+        # R014 owns DOM render sinks (innerHTML/…), R017 owns Python server
+        # redirect(), R031 owns outbound fetch sinks; this rule owns
+        # client-side navigation.
+        r"(?i)(?:"
+        # (A) executable-scheme literal into a navigation sink (bounded scan).
+        r"\b(?:window\.)?location(?:\.href)?\s*=[^;\n]*?['\"](?:javascript:|data:(?:text/html|application/xhtml))"
+        r"|\bdocument\.location(?:\.\w+)?\s*=[^;\n]*?['\"](?:javascript:|data:(?:text/html|application/xhtml))"
+        r"|\bwindow\.open\s*\([^)\n]*?['\"](?:javascript:|data:(?:text/html|application/xhtml))"
+        r"|\b(?:[a-z]\w*\.)?location\.(?:assign|replace)\s*\([^)\n]*?['\"](?:javascript:|data:(?:text/html|application/xhtml))"
+        r"|\.attr\(\s*['\"]href['\"]\s*,[^)\n]*?['\"](?:javascript:|data:(?:text/html|application/xhtml))"
+        r"|\.href\s*=[^;\n]*?['\"](?:javascript:|data:(?:text/html|application/xhtml))"
+        r"|"
+        # (B) request/URL-search-derived URL into a navigation sink.
+        r"(?:"
+        r"\bwindow\.open\s*\(\s*(?!['\"])"
+        r"|\b(?:[a-z]\w*\.)?location\.(?:assign|replace)\s*\(\s*(?!['\"])"
+        r"|\b(?:window\.)?location(?:\.href)?\s*=\s*(?!['\"])"
+        r"|\bdocument\.location(?:\.\w+)?\s*=\s*(?!['\"])"
+        r")[^;\n]*(?:"
+        r"\b(?:request|req|ctx|event)\b\s*(?:\.|\[)"
+        r"|\bsearchParams\b\s*\.\s*get\s*\("
+        r"|(?-i:\blocation\.search\b)"
+        r")"
+        r"|"
+        # (C) url-named variable fed to a navigation sink (R031-style,
+        # case-insensitive so returnUrl/targetUrl fire; SCREAMING constants
+        # rejected by the scoped lowercase lookahead).
+        r"(?:"
+        r"\bwindow\.open\s*\(\s*"
+        r"|\b(?:[a-z]\w*\.)?location\.(?:assign|replace)\s*\(\s*"
+        r"|\b(?:window\.)?location(?:\.href)?\s*=\s*"
+        r"|\bdocument\.location(?:\.\w+)?\s*=\s*"
+        r")(?!['\"])(?-i:(?=[A-Za-z_]\w*[a-z]))[\w.]*?(?:url|uri|link|endpoint|target|callback|webhook)[\w.\[\]]*"
+        r")",
+        "Navigating the browser to a javascript:/html-data: literal, a request/URL-search-derived URL, or a url-named variable can execute attacker script or redirect users to a malicious host — validate against an allowlist of hosts/schemes and build URLs only from server-known data before assignment to window.open/location (.href)/location.assign|replace",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

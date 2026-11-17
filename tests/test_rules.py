@@ -1190,6 +1190,76 @@ def test_insecure_permissions_safe_and_dynamic_quiet():
     assert not [i for i in issues if i.rule_id == "R038-perm"], issues
 
 
+def test_navigation_dynamic_and_executable_urls_flagged():
+    """R039-nav flags client-side navigation to an unsafe URL (CWE-79/CWE-601):
+    (A) javascript:/html-capable data: literals into window.open /
+    location.assign|replace / location(.href)= / document.location / jQuery
+    .attr('href', …) / element .href =; (B) request/URL-search-derived URLs
+    (req.*/request.*/ctx.*/event.* accessors, searchParams.get(…),
+    location.search-derived) into those sinks; (C) url-named variables
+    (url/uri/link/endpoint/target/callback/webhook, case-insensitive like R031
+    so returnUrl fires)."""
+    src = (
+        'location.href = "javascript:alert(1)";\n'
+        'window.location = "javascript:" + payload;\n'
+        "window.location.href = 'javascript:void(0)';\n"
+        'document.location = "javascript:document.cookie";\n'
+        'window.open("javascript:alert(document.cookie)");\n'
+        'location.replace("javascript:alert(1)");\n'
+        '$("#btn").attr("href", "javascript:alert(1)");\n'
+        'a.href = "javascript:evil()";\n'
+        'window.open("data:text/html,<script>alert(1)</script>");\n'
+        'document.location = "data:text/html;base64,PHNjcmlwdD4=";\n'
+        "window.open(req.query.returnUrl);\n"
+        "window.location = request.query.next;\n"
+        "location.href = req.params.link;\n"
+        "location.assign(searchParams.get('url'));\n"
+        "document.location.href = new URLSearchParams(window.location.search).get('redirect');\n"
+        "if (req.query.next) location.href = req.query.next;\n"
+        "location.replace(url);\n"
+        "window.open(url, '_blank', 'noopener');\n"
+        "location.href = returnUrl;\n"
+        "window.open(deployedUrl);\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R039-nav"]
+    assert [i.line for i in hits] == list(range(1, 21)), f"R039-nav mismatch: {hits}"
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_navigation_static_literals_and_neutral_vars_quiet():
+    """R039-nav must not fire on static URL literals (/login, https://…),
+    non-URL element assignments (img.src / iframe.src), neutral variables
+    (nextStep / iframeSrc / userSelectedItem / deployedUrl handled via R031
+    convention), SCREAMING_CASE constants (BASE_URL / DEPLOYED_URL), the
+    two-statement `const next = req.query.next; location.href = next;` shape,
+    location.reload() / history.replaceState / location.hash = assignment,
+    or a bare window.open() with no navigation argument."""
+    src = (
+        'location.href = "/login";\n'
+        'window.location = "/home";\n'
+        'window.open("https://example.com/docs");\n'
+        'location.assign("/success?ref=" + orderId);\n'
+        'a.href = "/profile";\n'
+        'img.src = "/img/logo.png";\n'
+        'iframe.src = "about:blank";\n'
+        "location.href = nextStep;\n"
+        "window.location = window.location.origin + pathname;\n"
+        "window.location.reload();\n"
+        "window.open(userSelectedItem);\n"
+        "location.href = iframeSrc;\n"
+        "const next = req.query.next; location.href = next;\n"
+        "location.href = BASE_URL + '/docs';\n"
+        "window.open(DEPLOYED_URL);\n"
+        'history.replaceState(null, "", "/new");\n'
+        "action.href = response.url;\n"
+        "popup = window.open();\n"
+        'location.hash = "tab-id";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R039-nav"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1358,7 +1428,7 @@ def test_every_rule_has_test_exposure():
         "R027-massassig", "R028-nosql", "R029-ldap", "R030-xpath",
         "R031-ssrf-js", "R032-cmd-node", "R033-protopoll",
         "R034-redos", "R035-hdrinj", "R036-loginj", "R037-credurl",
-        "R038-perm",
+        "R038-perm", "R039-nav",
     }
     assert exposed <= rids
     uncovered = rids - exposed
