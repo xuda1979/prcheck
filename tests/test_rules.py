@@ -1701,6 +1701,54 @@ def test_postmsg_recv_sender_validated_or_non_listener_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R047-postmsg-recv"], issues
 
 
+def test_cookieset_sensitive_key_without_flag_flagged():
+    """R048-cookieset fires when a response set_cookie / res.cookie call names
+    a security-sensitive key (session/token/credential) with none of
+    Secure/HttpOnly/SameSite on the line (CWE-614/CWE-1004)."""
+    src = (
+        "response.set_cookie('session', token)\n"
+        "resp.set_cookie('jwt', token.encode())\n"
+        "response.set_cookie('csrf_token', csrf_value)\n"
+        "r.set_cookie('sid', xsrf)\n"
+        "res.cookie('auth_token', value);\n"
+        "res.cookie('session', sid.value)\n"
+        "response.set_cookie('api_key', k)\n"
+        "res.cookie('token', t)\n"
+        "response.set_cookie('secret', 's3cr3t')\n"
+        "Response.set_cookie('SessionID', v)\n"
+        "reply.set_cookie('id_token', tok)\n"
+        "response.set_cookie('access-token', token)\n"
+        "res.cookie('csrfToken', t, {});\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R048-cookieset"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_cookieset_flagged_or_other_sinks_stay_quiet():
+    """R048-cookieset stays quiet when any hardening flag appears on the line,
+    the cookie name is generic, or the sink is client-side document.cookie /
+    jar/$.cookie / a bare set_cookie (not response-scoped)."""
+    src = (
+        "response.set_cookie('session', token, httponly=True, secure=True, samesite='Lax')\n"
+        "response.set_cookie('session', token, httponly=True)\n"
+        "res.cookie('token', t, { httpOnly: true, secure: true })\n"
+        "res.cookie('token', t, { secure: true })\n"
+        "response.set_cookie('theme', 'dark')\n"
+        "document.cookie = 'session=' + token;\n"
+        "jar.set_cookie(cookie)\n"
+        "$.cookie('session', v)\n"
+        "res.setTimeout(fn, 100)\n"
+        "response.cookies['session'] = token\n"
+        "set_cookie('session', x)\n"
+        "response.set_cookie('uid', uid, max_age=3600)\n"
+        "res.cookie('csrf_token', csrf, { httpOnly: true })\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R048-cookieset"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1873,6 +1921,7 @@ def test_every_rule_has_test_exposure():
         "R042-websock", "R043-math-random", "R044-storage", "R045-cookie",
         "R046-evaljs",
         "R047-postmsg-recv",
+        "R048-cookieset",
     }
     assert exposed <= rids
     uncovered = rids - exposed

@@ -236,7 +236,11 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   argument, the same primitive as `eval`, CWE-95), unvalidated
   cross-window message receivers (postMessage handlers consuming `event.data`
   without referencing `event.origin`/`event.source` on the same line —
-  CWE-346, the receiver-side complement to the wildcard targetOrigin rule).
+  CWE-346, the receiver-side complement to the wildcard targetOrigin rule),
+  server-side session/token cookies written without
+  Secure/HttpOnly/SameSite flags (`response.set_cookie`/`res.cookie` calls
+  naming a session/token/credential key with none of the three hardening
+  flags on the line — CWE-614/CWE-1004).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

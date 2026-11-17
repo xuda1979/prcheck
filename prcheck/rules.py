@@ -1228,6 +1228,36 @@ _RULE_TUPLES = [
         r"[^\n]*?(?:\.data\b|\[\s*['\"]data['\"]\s*\])",
         "A window message handler that consumes event.data without checking event.origin trusts any cross-origin page to script your handler (CWE-346): an attacker page postMessage()s a crafted payload straight into it. Validate event.origin against an explicit allow-list (or event.source, plus the MessageEvent.ports origin) before touching the payload, and never use '*'-style catch-alls",
     ),
+    (
+        "R048-cookieset",
+        "security",
+        "medium",
+        "Server-side session/token cookie written without Secure/HttpOnly/SameSite flags",
+        # CWE-614 / CWE-1004: a sensitive (session/token/credential) cookie
+        # written server-side via a response set_cookie / res.cookie call whose
+        # line carries none of the three hardening flags — without Secure it
+        # rides cross-site in cleartext, without HttpOnly any XSS reads the
+        # bearer material, without SameSite it's CSRF-emailable.  R045 owns the
+        # client-side document.cookie domain and R011 owns Django-style
+        # SESSION_COOKIE_* / SameSite=None config lines; both stay quiet here
+        # via the response-receiver guard.  Same line-scoped contract as R045: a
+        # flag set on a later line of a multi-line call is a compound write — no
+        # in-line hardening keyword = no auditable evidence, stay quiet rather
+        # than guess (the identifier atom set is shared with R044/R045).
+        r"(?i)\b(?:response|resp|res|r|reply)\s*\.\s*(?:set_cookie\s*\(|cookie\s*\()"
+        r"(?![^\n]*(?:httponly|http_only|samesite|secure)\s*[=:])"
+        r"[^\n]*?"
+        r"(?:(?<=_)|(?<![A-Za-z0-9_]))(?:session(?!\s*storage)(?:[_-]?id)?|jwt|"
+        r"csrf(?:[_-]?token)?|access[_-]?token|refresh[_-]?token|id[_-]?token|"
+        r"oauth[_-]?token|auth(?:[_-]?token)?|credential|api[_-]?key|secret|"
+        r"private[_-]?key|passw(?:ord|d)|token|sid)(?:\b|(?=[_-])|(?=(?-i:[A-Z])))"
+        r"|"
+        r"(?<=(?-i:[a-z]))(?:session(?!\s*storage)(?:[_-]?id)?|jwt|"
+        r"csrf(?:[_-]?token)?|access[_-]?token|refresh[_-]?token|id[_-]?token|"
+        r"oauth[_-]?token|auth(?:[_-]?token)?|credential|api[_-]?key|secret|"
+        r"private[_-]?key|passw(?:ord|d)|token|sid)(?=$|[^A-Za-z0-9_]|(?=(?-i:[A-Z])))",
+        "A sensitive session/token cookie written server-side without Secure (sent in cleartext over HTTP), HttpOnly (readable by any XSS) or SameSite (CSRF-abusable) — CWE-614/CWE-1004. Set all three, matching the app's threat model: Secure over the TLS origin, HttpOnly so scripts can't read it, and SameSite=Strict/Lax (None only with Secure) on this response",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
