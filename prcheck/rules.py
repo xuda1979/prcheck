@@ -994,6 +994,21 @@ _RULE_TUPLES = [
         r")",
         "Navigating the browser to a javascript:/html-data: literal, a request/URL-search-derived URL, or a url-named variable can execute attacker script or redirect users to a malicious host — validate against an allowlist of hosts/schemes and build URLs only from server-known data before assignment to window.open/location (.href)/location.assign|replace",
     ),
+    (
+        "R040-tabnab",
+        "security",
+        "medium",
+        "Reverse tabnabbing: anchor/window.open with target=_blank lacking rel=noopener",
+        # (A) inline HTML/JSX anchor whose opening tag uses target="_blank"
+        # but carries no rel= value containing noopener/noreferrer.
+        # (B) window.open(url, "_blank") with no features string, or a features
+        # string that lacks noopener/noreferrer.
+        r"(?i)(?:"
+        r"<a\b(?=[^>]*?\btarget\s*=\s*['\"]_blank['\"])(?![^>]*?\brel\s*=\s*['\"][^'\">]*?\b(?:noopener|noreferrer)\b)[^>]*?>"
+        r"|\bwindow\.open\s*\(\s*[^,)]*?,\s*['\"]_blank['\"]\s*(?:\)|,\s*(?![^)]*\b(?:noopener|noreferrer)\b)[^)]*\))"
+        r")",
+        "Links/views opened in a new tab (_blank) control the new page and can navigate the opener to a phishing site — guard the hand-off with rel=noreferrer (covers noopener) or, for window.open, add noopener/noreferrer to the features string",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

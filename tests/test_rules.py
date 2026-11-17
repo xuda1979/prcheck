@@ -1260,6 +1260,65 @@ def test_navigation_static_literals_and_neutral_vars_quiet():
     assert not [i for i in issues if i.rule_id == "R039-nav"], issues
 
 
+def test_tabnabbing_target_blank_without_noopener_flagged():
+    """R040-tabnab flags (A) inline HTML/JSX anchors whose opening tag uses
+    target="_blank" (case-insensitive, attribute order irrelevant) with no
+    rel= value containing noopener/noreferrer, and (B) window.open(url,
+    "_blank") with no features string or a features string lacking
+    noopener/noreferrer — reverse tabnabbing (CWE-1021)."""
+    src = (
+        '<a href="https://example.com" target="_blank">Docs</a>\n'
+        '<a href={docsUrl} target="_blank">Docs</a>\n'
+        "'<a href=\"' + url + '\" target=\"_blank\">click</a>'\n"
+        '<a target="_blank" href="/docs">Go</a>\n'
+        '<a href="/x" TARGET="_BLANK" class="btn">Go</a>\n'
+        '<a href="https://x.io" target="_blank" rel="external">\n'
+        '<a href={u} target="_blank" rel="">\n'
+        '<a href="./report.pdf" target="_blank">Report</a>\n'
+        '<a href={{ \'/a/\' + id }} target="_blank">\n'
+        '<a href={url} data-x="1" target="_blank" onClick={f}>\n'
+        "<a href=\"https://x.com\" target='_blank'>\n"
+        'window.open(url, "_blank");\n'
+        "window.open(docsUrl, '_blank');\n"
+        'window.open(link, "_blank", "width=600,height=400");\n'
+        'window.open(link, "_blank", "toolbar=yes");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R040-tabnab"]
+    assert [i.line for i in hits] == list(range(1, 16)), f"R040-tabnab mismatch: {hits}"
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_tabnabbing_rel_noopener_or_safe_target_quiet():
+    """R040-tabnab stays quiet when the anchor carries rel=noopener/noreferrer
+    (any position/case/spacing), window.open passes noopener/noreferrer in the
+    features string or targets _self, and for non-anchor / non-navigating code:
+    plain links, img/form/name/_blank attributes, element.target assignment, a
+    bare `const target = "_blank"` string, and id="blank" elements."""
+    src = (
+        '<a href="https://example.com" target="_blank" rel="noopener">Docs</a>\n'
+        '<a href={url} target="_blank" rel="noopener noreferrer">Go</a>\n'
+        '<a target="_blank" rel="noreferrer" href="/logout">Logout</a>\n'
+        '<a rel="noopener" target="_blank" href="/x">\n'
+        'window.open(url, "_blank", "noopener");\n'
+        "window.open(url, '_blank', 'noopener,width=600');\n"
+        'window.open(url, "_blank", "noopener", "extra");\n'
+        'window.open(url, "_blank", "width=600,noopener");\n'
+        "return window.open(url, '_blank', 'location=yes,noopener');\n"
+        'window.open(url, "_self");\n'
+        '<a href="/docs">Plain link</a>\n'
+        '<img src="pic.jpg" alt="blank page">\n'
+        '<form action="/submit" method="post" target="_blank">\n'
+        'element.target = "_blank";\n'
+        '<a name="_blank" href="#toc">Top</a>\n'
+        'const target = "_blank";\n'
+        '<a id="blank" href="/x">\n'
+        "if (a && b) { link(target) }\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R040-tabnab"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1428,7 +1487,7 @@ def test_every_rule_has_test_exposure():
         "R027-massassig", "R028-nosql", "R029-ldap", "R030-xpath",
         "R031-ssrf-js", "R032-cmd-node", "R033-protopoll",
         "R034-redos", "R035-hdrinj", "R036-loginj", "R037-credurl",
-        "R038-perm", "R039-nav",
+        "R038-perm", "R039-nav", "R040-tabnab",
     }
     assert exposed <= rids
     uncovered = rids - exposed
