@@ -1507,6 +1507,50 @@ _RULE_TUPLES = [
         r")",
         "A JPQL / HQL / native SQL query assembled by string concatenation or a builder and fed to EntityManager.createQuery / createNativeQuery / Hibernate session.createQuery — CWE-943 data-query injection. Concatenating lowercase request input (request.getParameter, DTO fields, config values) into the query string lets an attacker smuggle OR clauses / UNION fragments (read data) or 1=1 tautologies (drop data); native queries pass fragments opaquely to the DB. Use createQuery(parameterized) / PreparedStatement-style setParameter bindings or the Criteria API builder, keep query fragments static server-side constants, and never concat user data into the JPQL/HQL string",
     ),
+    (
+        "R057-ssrf",
+        "security",
+        "high",
+        "Java URL / HTTP client built from a non-literal or request-derived URL",
+        # CWE-918 (Server-Side Request Forgery): Java opens outbound
+        # connections through java.net.URL.openConnection/openStream, Apache
+        # HttpClient.HttpGet/HttpPost, java.net.http.HttpClient.send, Spring
+        # RestTemplate.getForObject/exchange, Spring WebClient.get().uri and
+        # OkHttp Request.Builder().url — so a URL assembled from request input
+        # (request/req.getParameter/getHeader/URI.create(request...),
+        # concatenation of a lowercase identifier) lets a caller make the
+        # server fetch arbitrary internal endpoints: cloud metadata
+        # (http://169.254.169.254/), inside-network services, and file://
+        # reads.  The sinks above must receive a non-literal URL: a
+        # request/req-accessor argument, a bare lowercase identifier passed
+        # straight into new URL( ... ) and then opened, a builder-chain or
+        # method-chain argument (sb.toString(), baseUrl + ...),
+        # "...-literal" + lower-identifier concatenation, or a plain
+        # (url|u)-named variable opened.  Literal "https://..." strings,
+        # ALL_CAPS constants, bare HttpRequest objects, method-argument
+        # accessors on config objects, imports and getResource()/classloader
+        # lookups carry no fused sink and stay quiet.  Java sources are
+        # case-sensitive CamelCase, so no inline flag is used (same convention
+        # as R053-R056).  Single-line contract.
+        r"(?:\bnew\s+URL\s*\(\s*(?!['\"])\s*(?:request|req)\b"
+        r"|\bnew\s+URL\s*\([a-z_]\w*(?:\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\(\s*[^)\n]*\)\s*)*\)\s*\.\s*openConnection"
+        r"|\bnew\s+URL\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|\b(?:HttpURLConnection|HttpsURLConnection|URLConnection|URL)\s*\.\s*openConnection"
+        r"\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|\bnew\s+(?:RestTemplate|WebClient|OkHttpClient|HttpClient|AsyncHttpClient)\s*\(\s*\)\s*\.\s*"
+        r"(?:getForObject|getForEntity|exchange|execute|send|retrieve)\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|\b(?:restTemplate|webClient|client|httpClient|okHttpClient|rest)\s*\.\s*"
+        r"(?:getForObject|getForEntity|exchange|execute|send|retrieve)\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|\.send\s*\([^;\n]*\b(?:request|req)\s*\.\s*(?:getParameter|getHeader|getRequestURI|getQueryString)\s*\("
+        r"|\bURI\s*\.\s*create\s*\((?!['\"])\s*(?:request|req)\s*\."
+        r"|\bnew\s+Http(?:Get|Post|Put|Delete|Uri)?\s*\(\s*(?!['\"])\s*(?:request|req)\b"
+        r"|\b(?:request|req)\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getRequestURL)"
+        r"\s*\([^)\n]*\)\s*[^)\n]*(?:URL|openConnection|HttpGet|HttpPost|URIBuilder)"
+        r"|\b(?:url|u)\s*\.\s*openConnection\s*\("
+        r"|\.(?:uri|url)\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r")",
+        "A Java outbound HTTP/URL sink fed a non-literal, request-derived or concatenated URL — CWE-918 server-side request forgery. URL.openConnection/openStream, HttpClient.newHttpClient().send, RestTemplate/WebClient/OkHttpClient calls and Apache HttpClient get/post must resolve the target before any network hop: a URL built from request.getParameter/URI.create(request...) or by string concatenation can be pointed at cloud metadata (169.254.169.254), internal services or file:// URIs, letting a caller read secrets or drive the server as a proxy. Resolve URLs only from a fixed server-side allow-list (scheme + host), reject non-http(s) schemes, and pass pre-validated absolute constants to the client instead of raw request-derived strings",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

@@ -301,7 +301,19 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   Criteria-API `CriteriaQuery` builder objects, bare-identifier query
   objects, UPPER_CASE concatenated constants, all-literal queries,
   arithmetic inside a literal string and non-query string building stay
-  quiet).
+  quiet), Java server-side request forgery
+  (`URL.openConnection` / `openStream` on a request-derived or
+  `new URL(...)`-built target, Apache `Http(Get|Post)` constructed from
+  `request.getParameter(...)`, `java.net.http.HttpClient.send` with
+  `URI.create(request...)`, Spring `RestTemplate.getForObject` /
+  `WebClient.uri(...)` and OkHttp `Request.Builder().url(...)` fed a
+  `'...' + lowercaseIdentifier` concatenated or bare-variable URL, incl.
+  `url`/`u`-named variables opened directly — the server fetches an
+  attacker-chosen target (cloud metadata `169.254.169.254`, internal
+  services, `file://` reads) — CWE-918; literal `https://...` strings,
+  ALL_CAPS URL constants, bare `HttpRequest` objects, `config.get(...)`
+  accessor arguments, imports, `getResource()`/classloader lookups and
+  literal-path WebClient calls stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

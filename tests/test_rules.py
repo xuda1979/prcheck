@@ -2196,6 +2196,67 @@ def test_jpaqli_literal_bare_identifier_or_other_sinks_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R056-jpaqli"], issues
 
 
+def test_ssrf_java_request_derived_or_non_literal_url_flagged():
+    """R057-ssrf fires when a Java URL / HTTP-client sink receives a
+    non-literal, request-derived or concatenated URL — new URL() on request
+    input, URL.openConnection/openStream on a bare lowercase or builder-chain
+    argument, \"literal\" + lower-concat URL strings, HttpClient.send with
+    URI.create(request...), RestTemplate/WebClient/OkHttpClient concat URLs,
+    Apache HttpGet/HttpPost on request input, and url/u-named variables
+    opened (CWE-918: the server fetches an attacker-chosen target such as
+    cloud metadata or internal services)."""
+    src = (
+        'URL url = new URL(request.getParameter("url"));\n'
+        'URL u = new URL(req.getParameter("target"));\n'
+        "HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();\n"
+        "URLConnection c = new URL(userInput).openConnection();\n"
+        "URLConnection conn = new URL(sb.toString()).openConnection();\n"
+        'URLConnection conn = new URL("https://api.example.com/report?dest=" + request.getParameter("url")).openConnection();\n'
+        'String html = new URL(baseUrl + "/" + request.getParameter("doc")).openStream();\n'
+        'HttpClient client = HttpClient.newHttpClient(); client.send(HttpRequest.newBuilder().uri(URI.create(request.getParameter("url"))).build(), HttpResponse.BodyHandlers.ofString());\n'
+        'RestTemplate rest = new RestTemplate(); String r = rest.getForObject("https://internal/" + request.getParameter("path"), String.class);\n'
+        'WebClient.create().get().uri("http://meta.internal/" + userInput).retrieve();\n'
+        'OkHttpClient client = new OkHttpClient(); Request r = new Request.Builder().url("http://169.254.169.254/" + path).build();\n'
+        "HttpURLConnection conn = (HttpURLConnection) url.openConnection();\n"
+        'String json = new RestTemplate().getForObject("http://" + backend + "/status", String.class);\n'
+        'CloseableHttpResponse resp = httpclient.execute(new HttpGet(request.getParameter("url")));\n'
+        "HttpPost post = new HttpPost(req.getParameter(\"target\"));\n"
+        'URI target = URI.create(request.getParameter("dest"));\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R057-ssrf"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_ssrf_java_literal_const_or_other_targets_stay_quiet():
+    """R057-ssrf stays quiet for literal https:// URLs, ALL_CAPS URL
+    constants, bare HttpRequest objects passed to send(), non-URL variables,
+    imports, getResource()/classloader lookups, literal-path WebClient calls
+    and plain string building — no fused URL sink receives non-literal
+    input."""
+    src = (
+        'URL url = new URL("https://example.com/api");\n'
+        'URL u = new URL("https://example.com");\n'
+        'HttpURLConnection conn = (HttpURLConnection) new URL("https://example.com").openConnection();\n'
+        'URLConnection conn = new URL("https://example.com/report").openConnection();\n'
+        'String html = new URL("https://example.com").openStream();\n'
+        "URLConnection conn = conn2.openConnection();\n"
+        'URI uri = URI.create("https://example.com");\n'
+        "HttpClient client = HttpClient.newHttpClient(); client.send(request, handler);\n"
+        'client.send(HttpRequest.newBuilder().uri(URI.create(BASE_URL)).build(), handler);\n'
+        'HttpURLConnection hc = (HttpURLConnection) new URL("https://" + HOST).openConnection();\n'
+        'String r = restTemplate.getForObject("https://api.example.com/users", String.class);\n'
+        'webClient.get().uri("/api/users").retrieve();\n'
+        "import java.net.URL;\n"
+        'URLConnection conn = this.getClass().getResource("x").openConnection();\n'
+        'String connector = url + "/connect";\n'
+        'URLConnection conn = new URL(config.get("url")).openConnection();\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R057-ssrf"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2377,6 +2438,7 @@ def test_every_rule_has_test_exposure():
         "R054-javadeser",
         "R055-spelinj",
         "R056-jpaqli",
+        "R057-ssrf",
     }
     assert exposed <= rids
     uncovered = rids - exposed
