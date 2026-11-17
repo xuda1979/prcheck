@@ -451,7 +451,22 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   (`out.println("Hello")`), constants (`PAGE_CACHE`, `COLUMN`), numeric
   operands, non-writer receivers (`helper.print(...)`), header writes
   (`setContentType`/`setHeader`/`sendRedirect`) and `getWriter()`
-  acquisition without a write call stay quiet).
+  acquisition without a write call stay quiet), and Java insecure-random
+  security values (a security keyword — `password`, `passwd`, `pw`,
+  `token`, `secret`, `apiKey`/`api_key`, `otp`, `nonce`, `salt`, `verif*`,
+  `session`/`sessionId`, `csrf`, `jwt`, `passCode`/`pass_code`, `pin`,
+  `resetToken`/`accessToken`/`refreshToken`/`authToken` — standing before a
+  `java.util.Random`-family PRNG on the added line: `new Random(...)` (incl.
+  fixed-seed `new Random(42)`), `ThreadLocalRandom` (`current().nextX`), or
+  Apache Commons lang3 `RandomUtils.nextX`/`RandomStringUtils.random*` — a
+  seeded LCG or shared PRNG recovers its state from a handful of outputs, so
+  reset/access tokens, session ids, CSRF tokens or OTPs derived from it can
+  be replayed, guessed or brute-forced — CWE-330; `SecureRandom` /
+  `SecureRandom.getInstanceStrong()` / `UUID.randomUUID()` (the safe
+  alternatives), `Math.random()` (R043 owns it in every language),
+  keyword-free Random uses (rolls, sample indices) and staged receivers
+  (`Random rnd = new Random()` with the `nextX()` call on a different line)
+  stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

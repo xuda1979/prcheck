@@ -2909,6 +2909,75 @@ def test_javaxss_literal_or_console_or_nonwriter_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R067-javaxss"], issues
 
 
+def test_javarandom_security_value_from_insecure_prng_flagged():
+    """R068-javarandom fires when a security keyword stands before a
+    java.util.Random-family PRNG on the same line — new Random() (incl.
+    fixed-seed form), ThreadLocalRandom, Commons lang3 RandomUtils and
+    RandomStringUtils minting a password/token/nonce/salt/CSRF/OTP/API key
+    or session id (CWE-330)."""
+    src = (
+        'String password = String.valueOf(new Random().nextLong());\n'
+        'String sessionId = String.valueOf(new Random().nextInt());\n'
+        'byte[] salt = new byte[16]; new Random().nextBytes(salt);\n'
+        'BigInteger nonce = new BigInteger(128, new Random());\n'
+        'String otp = String.format("%06d", new Random().nextInt(1000000));\n'
+        'String csrfToken = Integer.toString(new Random().nextInt());\n'
+        'String resetToken = new BigInteger(130, new Random()).toString(32);\n'
+        'String verifCode = String.valueOf(new Random().nextLong());\n'
+        'String csrf = Integer.toString(new Random().nextInt());\n'
+        'String authToken = String.valueOf(new Random(42).nextLong());\n'
+        'String apiKey = Long.toString(ThreadLocalRandom.current().nextLong());\n'
+        'String secret = String.valueOf(new Random().nextInt());\n'
+        'String jwt = Long.toString(new Random().nextLong()) + "";\n'
+        'String refreshToken = "" + new java.util.Random().nextInt();\n'
+        'String pin = String.format("%04d", RandomUtils.nextInt(0, 10000));\n'
+        'String passCode = RandomStringUtils.randomAlphanumeric(16);\n'
+        'char[] pw = randomPassword(new Random());\n'
+        'String nonceStr = String.valueOf(new Random().nextLong());\n'
+        'String pwd = String.valueOf(new Random().nextInt());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R068-javarandom"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javarandom_secure_or_keywordfree_random_stays_quiet():
+    """R068-javarandom stays quiet for SecureRandom/UUID alternatives,
+    Math.random() (R043 owns it), keyword-free Random uses (rolls, indices),
+    staged receivers (Random rnd = new Random() then a separate nextX line)
+    and security values from non-Random sources."""
+    src = (
+        'Random rand = new Random();\n'
+        'int n = new Random().nextInt(100);\n'
+        'double d = Math.random();\n'
+        'int guess = ThreadLocalRandom.current().nextInt(1, 7);\n'
+        'String id = UUID.randomUUID().toString();\n'
+        'SecureRandom sr = new SecureRandom();\n'
+        'byte[] b = new byte[16]; new SecureRandom().nextBytes(b);\n'
+        'sr.nextBytes(salt);\n'
+        'String token = request.getParameter("token");\n'
+        'String nonce = nonceProvider.get();\n'
+        'Collections.shuffle(list);\n'
+        'String password = "correct horse battery staple";\n'
+        'long stamp = System.nanoTime();\n'
+        'Random rnd = new Random(42);\n'
+        'int row = rowRandom.nextInt();\n'
+        'String salt = saltStore.getSalt();\n'
+        'logger.debug("roll=" + new Random().nextInt(6));\n'
+        'double ratio = Math.random() * 2 - 1;\n'
+        'char c = alphabet.charAt(new Random().nextInt(alphabet.length()));\n'
+        'new Random().setSeed(System.nanoTime());\n'
+        'String seed = new BigInteger(130, new Random()).toString(32);\n'
+        'String sessionid = sessionManager.next();\n'
+        'Set<String> tokenStore = new HashSet<>();\n'
+        'String pwd = derivePassword();\n'
+        'String secret = getSecretFromVault();\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R068-javarandom"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -3101,6 +3170,7 @@ def test_every_rule_has_test_exposure():
         "R065-java4xx",
         "R066-javacrypto",
         "R067-javaxss",
+        "R068-javarandom",
     }
     assert exposed <= rids
     uncovered = rids - exposed

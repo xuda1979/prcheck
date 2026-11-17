@@ -1970,6 +1970,49 @@ _RULE_TUPLES = [
         r")",
         "A Java response body writer emits client-controlled bytes back to the HTTP client — CWE-79 cross-site scripting. response.getWriter().print/println/write/append/format/printf, bare response-writer receivers (out/pw/writer/printWriter/responseWriter/outWriter .print/println/write) or a JSP <%= request.* %> expression is fed a request accessor (getParameter/getHeader/getQueryString/getRequestURI), a 'prefix' + variable concatenation or a bare variable: the browser treats the echoed input as live markup/script, so a crafted parameter or header runs arbitrary JavaScript in the victim's origin (reflected or, when stored first, stored XSS) and can steal cookies/CSRF tokens or drive actions as the user. HTML-encode all dynamic output (context-aware encoding for the element/attribute/script/URL context, e.g. OWASP Java Encoder), or better render with a template engine that auto-escapes and never write request input into the body unencoded; keep data on the server side and use Content-Security-Policy to blunt the blast radius",
     ),
+    (
+        "R068-javarandom",
+        "security",
+        "high",
+        "Java insecure random for a security value: java.util.Random-family PRNG (new Random(), ThreadLocalRandom, Apache Commons lang3 RandomUtils/RandomStringUtils) used to mint a password/token/secret/nonce/salt/CSRF/OTP/API key or session id (CWE-330)",
+        # CWE-330 (Use of Insufficiently Random Values): a security secret
+        # derived from java.util.Random / ThreadLocalRandom / Apache Commons
+        # lang3 RandomUtils or RandomStringUtils is predictable.  The seeded
+        # LCG (incl. the fixed-seed new Random(42) form) and the shared
+        # ThreadLocalRandom PRNG recover their internal state from a few
+        # observations, so an attacker replays the sequence or brute-forces
+        # the sample space — forged reset/auth tokens, guessed CSRF tokens or
+        # OTPs, session fixation or API-key theft.  Core Java's SecureRandom
+        # (new SecureRandom(), SecureRandom.getInstanceStrong(), sr.nextBytes)
+        # and UUID.randomUUID() are the SAFE alternatives and stay quiet.
+        # Single-line contract: fires only when a SECURITY keyword on the
+        # added line stands BEFORE a Random-family sink anywhere later on
+        # that line — new (java.util.)?Random(...)  (incl. fixed seed),
+        # ThreadLocalRandom (current().nextX), RandomUtils.nextToken-method,
+        # RandomStringUtils.random* — the keyword names the security value
+        # the PRNG result is assigned to.  Keyword matching allows simple
+        # CamelCase/lowercase composite identifiers (sessionId, csrfToken,
+        # authToken, apiKey, refreshToken, verifCode, passCode, nonceStr) via
+        # a trailing (?:\b|(?=[a-z]*[A-Z])|(?=[a-z]+\b)) boundary.  Quiet:
+        # keyword-free Random uses (rolls, sample indices, display ids,
+        # logger.debug("roll="+new Random().nextInt(6))), Math.random()
+        # (R043-math-random owns it in every language), staged receivers
+        # (Random rnd = new Random() then rnd.nextLong() on separate added
+        # lines — out of single-line scope), SecureRandom/UUID alternatives
+        # and any security value that comes from a non-Random source
+        # (getSecretFromVault(), saltStore.getSalt(), request input).
+        # Case-sensitive CamelCase, no inline flag (R053-R067 convention).
+        # Single-line contract.
+        r"(?:\b(?:password|passwd|pw|token|secret|otp|nonce|salt|verif|session|csrf|jwt|pin|"
+        r"api(?:[_-]?key|Key)|auth(?:[_-]?token|Token)|access(?:[_-]?token|Token)|"
+        r"reset(?:[_-]?token|Token)|refresh(?:[_-]?token|Token)|pass(?:[_-]?code|Code))"
+        r"(?:\b|(?=[a-z]*[A-Z])|(?=[a-z]+\b))"
+        r"[^\n]*?)"
+        r"(?:new\s+(?:java\.util\.)?Random\s*\(|ThreadLocalRandom\b|"
+        r"RandomUtils\s*\.\s*(?:nextInt|nextLong|nextBytes|nextDouble|nextFloat)\s*\(|"
+        r"RandomStringUtils\s*\.\s*random)",
+        "A Java security value (password, token, secret, nonce, salt, CSRF token, OTP, API key or session id) is minted from an insecure, predictable PRNG — CWE-330. java.util.Random is a seeded LCG and ThreadLocalRandom / Apache Commons lang3 RandomUtils / RandomStringUtils recover their state from a handful of outputs, so a reset-password or access token, session id, CSRF token or OTP derived from them can be replayed, guessed or brute-forced by an attacker; even the fixed-seed form new Random(42) produces a fully predictable sequence. Replace the call with a cryptographically secure generator: new SecureRandom(), SecureRandom.getInstanceStrong() for key material, sr.nextBytes()/sr.nextInt() for nonces/salts, or UUID.randomUUID() for opaque ids; inversely, treat any security value an insecure PRNG produced as compromised and rotate it",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
