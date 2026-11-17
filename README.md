@@ -179,7 +179,9 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   traversal, XSS sinks (innerHTML/outerHTML/document.write, React
   `dangerouslySetInnerHTML`, jQuery `.html()` setters), session cookie flags,
   weak/legacy crypto, insecure
-  `random` for security values, open redirects, client-side navigation to
+  `random` for security values, insecure JS `Math.random()` for security
+  values (tokens/OTPs/nonces vs. `crypto.getRandomValues`/`randomUUID`/
+  `randomBytes`), open redirects, client-side navigation to
   dynamic/executable-scheme URLs (window.open / location.href / location.assign|replace /
   document.location fed javascript:/html-data: literals, request-derived URLs, or url-named
   variables — DOM XSS / open redirect), reverse tabnabbing (target=_blank

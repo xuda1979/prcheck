@@ -1433,6 +1433,60 @@ def test_websocket_wss_literal_or_safe_origin_quiet():
     assert not [i for i in issues if i.rule_id == "R042-websock"], issues
 
 
+def test_math_random_security_value_flagged():
+    """R043-math-random flags Math.random() used to build a security value — a
+    token, OTP/pin, nonce, salt, session id, JWT/CSRF token or api key, whether
+    the keyword precedes or follows the call (CWE-338)."""
+    src = (
+        "const token = Math.random().toString(36).slice(2);\n"
+        "let otp = Math.floor(Math.random() * 1000000);\n"
+        "const pin = String(Math.floor(Math.random() * 1e6)).padStart(6, '0');\n"
+        "const nonce = String(Math.random());\n"
+        "var apiKey = Math.random().toString(36).slice(2, 10);\n"
+        "const resetToken = Math.random().toString(16);\n"
+        "const secret = Math.random();\n"
+        "const salt = Math.floor(Math.random() * 999999);\n"
+        "const sessionId = Math.random().toString(36);\n"
+        "const csrfToken = Math.random().toString(36);\n"
+        "const passcode = Math.random().toString(36).slice(2);\n"
+        "const digits = [0,1,2,3,4,5,6,7,8,9]; const otp = digits.sort(() => Math.random() - 0.5).join('');\n"
+        "const unc = Math.random().toString(36); const accessToken = unc + suffix;\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R043-math-random"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), (
+        f"R043-math-random mismatch: {hits}"
+    )
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_math_random_plain_or_crypto_quiet():
+    """R043-math-random stays quiet for Math.random() used as a plain PRNG
+    (gaming dice, animations, shuffle utilities, delays) and for
+    cryptographically secure substitutes (crypto.randomBytes / randomInt /
+    randomUUID / getRandomValues / subtle.digest), plus SCRAMBLED-out
+    keyword variables that hold the value off the same line."""
+    src = (
+        "const x = Math.random() * 10;\n"
+        "const point = Math.random();\n"
+        "Math.random() < 0.5 ? 'a' : 'b';\n"
+        "const frame = Math.floor(Math.random() * frames.length);\n"
+        "const token = crypto.randomBytes(32).toString('hex');\n"
+        "const otp = crypto.randomInt(100000, 999999);\n"
+        "const nonce = crypto.getRandomValues(new Uint32Array(1))[0];\n"
+        "const token = await crypto.subtle.digest('SHA-256', data);\n"
+        "function shuffle(a) { return a.sort(() => Math.random() - 0.5); }\n"
+        "const seed = Math.round(Math.random() * 100);\n"
+        "const url = '/roll?n=' + Math.floor(Math.random() * 6 + 1);\n"
+        "setTimeout(() => Math.random(), 100);\n"
+        "const randomToken = crypto.getRandomValues(new Uint8Array(32));\n"
+        "const delay = Math.random() * 1000;\n"
+        "const id = String(Math.random());\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R043-math-random"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1602,7 +1656,7 @@ def test_every_rule_has_test_exposure():
         "R031-ssrf-js", "R032-cmd-node", "R033-protopoll",
         "R034-redos", "R035-hdrinj", "R036-loginj", "R037-credurl",
         "R038-perm", "R039-nav", "R040-tabnab", "R041-postmsg",
-        "R042-websock",
+        "R042-websock", "R043-math-random",
     }
     assert exposed <= rids
     uncovered = rids - exposed

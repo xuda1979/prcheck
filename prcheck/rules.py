@@ -1062,6 +1062,27 @@ _RULE_TUPLES = [
         r")",
         "A WebSocket opened against 'ws://…' sends traffic unencrypted, and one opened against a request/URL-derived host lets an attacker redirect the connection (SSRF / endpoint poisoning) — always use wss:// against a pinned, allow-listed https: origin and never pass user input as the socket URL",
     ),
+    (
+        "R043-math-random",
+        "security",
+        "medium",
+        "Math.random() used to generate a security value",
+        # JS side of CWE-338: Math.random() is not cryptographically secure
+        # (Python R016 covers the `random` module). Fires when a security-value
+        # keyword (token / otp / nonce / session / jwt / csrf / password-family,
+        # including compound *_token names) and a Math.random() call share a line,
+        # in either order. crypto.getRandomValues / crypto.randomUUID /
+        # crypto.randomBytes / crypto.randomInt and shuffles used as plain
+        # utilities stay quiet.
+        r"(?i)(?:"
+        r"\b(?:password|passwd|pw|token|pin|secret|api[_-]?key|otp|nonce|salt|verif|session|session[_-]?id|csrf|jwt|pass[_-]?code|(?:csrf|auth|access|reset|refresh|session)[_-]?token)\b"
+        r"[^\n]*Math\s*\.\s*random\s*\("
+        r"|"
+        r"Math\s*\.\s*random\s*\([^\n]*"
+        r"\b(?:password|passwd|pw|token|pin|secret|api[_-]?key|otp|nonce|salt|verif|session|session[_-]?id|csrf|jwt|pass[_-]?code|(?:csrf|auth|access|reset|refresh|session)[_-]?token)\b"
+        r")",
+        "Math.random() is not cryptographically secure — an attacker who observes one output (or a partial PRNG seed) can predict tokens, OTPs and sessions (CWE-338). Use crypto.getRandomValues / crypto.randomUUID, or the server-side secrets module, for anything security-related",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
