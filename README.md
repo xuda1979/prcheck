@@ -208,7 +208,10 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   injection / log forging (request-derived values written to Python
   `logger`/`log`/`logging` `.debug`/`.info`/`.warning`/`.error`/`.exception`/
   `.critical` or `print()`, Node/JS `console.log`/`warn`/`error`/`info`, Java
-  `System.out`/`err` `.println`/`.print`/`.printf`).
+  `System.out`/`err` `.println`/`.print`/`.printf`), insecure file
+  permissions (world-writable chmod 0o777/0o666/0o1777, setuid/setgid
+  0o4777, makedirs/mkdir `mode=…`, quoted `['chmod', '777', …]`, and
+  `umask(0)` masking disabled).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

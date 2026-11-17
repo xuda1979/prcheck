@@ -1133,6 +1133,63 @@ def test_cred_in_url_legit_and_dynamic_quiet():
     assert not [i for i in issues if i.rule_id == "R037-credurl"], issues
 
 
+def test_insecure_permissions_world_writable_flagged():
+    """R038-perm flags world-writable file permissions / disabled umask (CWE-732):
+    os.chmod/os.open/fs.chmod(ync)/fs.open(ync)/fs.writeFile(ync)/Path().chmod with
+    a 0o777/0o666/0o1777 (incl. setuid/setgid 0o4777) or legacy 0777 literal,
+    os.makedirs/os.mkdir with mode=0o777/0o666/0o1777, umask(0)/(0o0) masking
+    disabled, and argv-array ['chmod', '777'|'0777', …] invocations."""
+    src = (
+        'os.chmod("app/key.pem", 0o777)\n'
+        "os.chmod(KEY_PATH, 0o666)\n"
+        "fs.chmodSync('/tmp/upload', 0o777)\n"
+        'Path("/srv/www").chmod(0o1777)\n'
+        "fs.openSync(cache_path, 'w', 0o666)\n"
+        "fs.writeFileSync('logs/app.log', data, { mode: 0o666 })\n"
+        'os.makedirs("/srv/uploads", mode=0o777, exist_ok=True)\n'
+        "os.mkdir(tmp, mode=0o666)\n"
+        "os.makedirs('/srv', mode=0o1777)\n"
+        "os.umask(0)\n"
+        "umask(0)  # disable masking before mkdtemp\n"
+        "process.umask(0)\n"
+        "os.chmod(f, 0777)   # legacy leading-zero octal\n"
+        "os.chmod(f, 0o4777) # setuid + world-writable\n"
+        'subprocess.run(["chmod", "-R", "777", upload_dir])\n'
+        'open("/tmp/key", "w").chmod(0o666)\n'
+        "os.open(pidfile, os.O_CREAT | os.O_WRONLY, 0o666)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R038-perm"]
+    assert [i.line for i in hits] == list(range(1, 18)), f"R038-perm mismatch: {hits}"
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_insecure_permissions_safe_and_dynamic_quiet():
+    """R038-perm must not fire on restrictive modes (0o600/0o644/0o700/0o755),
+    variable or symbolic-constant modes, proper umasks (0o022/0o077, and the
+    over-restrictive 0o777), decimal 777 (not octal), bare shell `chmod 777 /tmp/x`,
+    non-world-writable modes on the same call, or 0o777 appearing after the call
+    closes."""
+    src = (
+        'os.chmod("app/key.pem", 0o600)\n'
+        "os.chmod('x', 0o644)\n"
+        "os.chmod(x, 0o700)\n"
+        "os.chmod(path, perm)  # variable mode\n"
+        "os.chmod(path, S_IRUSR | S_IWUSR)\n"
+        "fs.chmodSync('/tmp/f', 0o644)\n"
+        "os.makedirs(out, exist_ok=True)\n"
+        "os.umask(0o022)\n"
+        "os.umask(0o077)\n"
+        "os.umask(0o777)  # over-restrictive, not a disable\n"
+        "chmod 777 /tmp/x\n"
+        "os.chmod(f, 777)  # decimal, not octal\n"
+        'os.open(pidfile, os.O_CREAT | os.O_WRONLY, 0o644)\n'
+        "os.chmod(f, 0o600)  # 0o777 mentioned later on the line\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R038-perm"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1301,6 +1358,7 @@ def test_every_rule_has_test_exposure():
         "R027-massassig", "R028-nosql", "R029-ldap", "R030-xpath",
         "R031-ssrf-js", "R032-cmd-node", "R033-protopoll",
         "R034-redos", "R035-hdrinj", "R036-loginj", "R037-credurl",
+        "R038-perm",
     }
     assert exposed <= rids
     uncovered = rids - exposed

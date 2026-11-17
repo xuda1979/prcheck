@@ -905,6 +905,35 @@ _RULE_TUPLES = [
         r")",
         "A URL or connection string embeds a plaintext credential (postgres://user:pass@host / mysql URL / jdbc?user=..&password=.. / ?token=..) — an attacker with read access to the repo captures the secret; move credentials to env vars/secret manager and keep only placeholders in code (hardcoded credential/CWE-798)",
     ),
+    (
+        "R038-perm",
+        "security",
+        "high",
+        "Insecure file permissions / umask disabled on sensitive path",
+        # Fires on a single added line when a world-writable octal mode literal
+        # (0o777/0o666/0o1777, incl. setuid/setgid forms like 0o4777) reaches a
+        # chmod/open/write call, an explicit makedirs/mkdir mode=, or a
+        # quoted argv-array chmod token; or when umask() gets a zero mask
+        # (0/0o0 — permission masking disabled, every subsequently created
+        # file is governed solely by the caller's umask and default 0o666/777,
+        # typically world-*writable). 0o600/0o644/0o755 and symbolic
+        # S_IRUSR|S_IWUSR stay quiet; decimal 777 is not octal and stays
+        # quiet (shell-style 0777 in a quoted chmod token is octal-ish and
+        # fires via branch D). B005 owns the existence-level "system call
+        # changed" flag; this rule flags the specific insecure-mode pattern.
+        r"(?i)(?:"
+        r"\b(?:os\.chmod|os\.open|fs\.chmod(?:Sync)?|fs\.open(?:Sync)?|"
+        r"fs\.writeFile(?:Sync)?|chmod)"
+        r"\s*\([^)\n]*\b0[oO]?(?:[1-7]?777|666)\b[^)\n]*\)"
+        r"|"
+        r"\b(?:os\.)?(?:makedirs|mkdir)\s*\([^)\n]*\bmode\s*=\s*0[oO]?(?:[1-7]?777|666)\b"
+        r"|"
+        r"\b(?:os\.|process\.)?umask\s*\(\s*0(?:o?0)?\b"
+        r"|"
+        r"\[\s*[\"']chmod[\"']\s*,[^\]\n]*[\"']0?(?:[1-7]?777|666)[\"']"
+        r")",
+        "A world-writable permission (chmod 0o777/0o666/0o1777, makedirs/mkdir mode=…, quoted chmod '777') or a disabled umask allows any local user to read/modify the file — restrict to owner-only (0o600/0o700) and keep a restrictive umask (e.g. 0o022/0o077); avoid setuid/setgid bits on world-writable files (insecure permissions/CWE-732)",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
