@@ -196,7 +196,9 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   `XMLHttpRequest().open(method, url)` sinks fed request-derived URLs),
   prototype pollution (JS `Object.assign`/lodash `merge` family/jQuery
   `extend` fed request-derived objects, or direct `__proto__` assignment of
-  request input).
+  request input), regex injection / ReDoS (Python `re.*` sinks
+  compile a request-derived pattern as their first argument, or a JS
+  `RegExp` constructor is built from request input).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

@@ -753,6 +753,46 @@ _RULE_TUPLES = [
         r")",
         "A JS merge/extend (Object.assign / lodash merge family / jQuery extend) is fed a request-derived object, or a __proto__ key is assigned request-derived data — an attacker can pollute the prototype of these objects (prototype pollution/CWE-1321)",
     ),
+    (
+        "R034-redos",
+        "security",
+        "high",
+        "Regex injection / ReDoS: a request-derived pattern is fed into a regex-compiling sink",
+        # Fires on a single added line when (CWE-1333):
+        #   (A) a Python re-module sink — re.compile/re.search/re.match/re.fullmatch/
+        #       re.split/re.findall/re.finditer/re.sub/re.subn — is fed a
+        #       request-derived FIRST argument (req/request/ctx/event accessor ->
+        #       .field / ['field'] / ?.field, incl. .get() calls and chained
+        #       request.data.re, keyword pattern=…) on the same line.
+        #   (B) a JS RegExp constructor — new RegExp(…)/RegExp(…) — has a
+        #       request-derived argument anywhere in its argument list (flags may
+        #       follow).
+        # The request-derived payload is required (no bare-variable heuristic) so
+        # literal patterns, SCREAMING_CASE constants, bare pattern variables, string
+        # methods (.match/.search on strings), f-string patterns, regex literals and
+        # non-request-derived calls stay quiet.  The Python branch guards against the
+        # literal-first-argument FP: "re.search(r'\d+', request.body.text)" is
+        # subject-derived, not pattern-derived, so the scan stops at the first
+        # top-level comma (never crosses `,` or `;` when hunting the accessor).  A
+        # quote immediately after the opening paren (with optional string-prefix
+        # letter) also suppresses the Python branch.
+        r"(?i)(?:"
+        # (A) Python re-module sinks fed a request-derived FIRST argument (the
+        #     pattern).  A literal first argument (quote with optional string
+        #     prefix) suppresses; the accessor scan never crosses a comma/semicolon,
+        #     so a request-derived SUBJECT as second argument (re.search(r'\d+',
+        #     request.body.text)) stays quiet.
+        r"\bre\.(?:compile|search|match|fullmatch|split|findall|finditer|sub|subn)\s*\("
+        r"(?![A-Za-z]?['\"])"
+        r"(?=[^\n,;]*\b(?:req|request|ctx|event)\b\s*(?:\?\.|\.|\[))"
+        r"|"
+        # (B) JS RegExp constructor fed a request-derived pattern (flags may follow;
+        #     a request accessor anywhere in the argument list counts).
+        r"(?:(?:\bnew\s+)?(?<![\w.])RegExp)\s*\("
+        r"(?=[^\n]*\b(?:req|request|ctx|event)\b\s*(?:\?\.|\.|\[))"
+        r")",
+        "A Python re-module call (compile/search/match/fullmatch/split/findall/finditer/sub/subn) compiles a request-derived first argument as the pattern, or a JS RegExp constructor is built from a request-derived pattern — user-controlled regexes can cause catastrophic backtracking or denial of service (regex injection/ReDoS/CWE-1333)",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

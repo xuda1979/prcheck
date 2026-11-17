@@ -915,6 +915,53 @@ def test_prototype_pollution_literals_and_safe_merges_quiet():
     assert not [i for i in issues if i.rule_id == "R033-protopoll"], issues
 
 
+def test_regex_injection_request_patterns_flagged():
+    """R034-redos flags Python re-module sinks fed a request-derived pattern as
+    the first argument, and JS RegExp constructors built from request input
+    (CWE-1333)."""
+    src = (
+        "re.compile(request.form['pattern'])\n"
+        "result = re.search(req.query.re, text)\n"
+        "if re.match(request.json['rx'], line):\n"
+        "ok = re.fullmatch(request.args.get('pat'), s)\n"
+        "hits = re.findall(request.data.re, buf)\n"
+        "html = re.sub(request.get_json().get('re'), 'x', html)\n"
+        "pattern = re.compile(ctx.request.query.regex)\n"
+        "new RegExp(req.query.re)\n"
+        "const rx = new RegExp(request.body.pattern, 'i')\n"
+        "if (RegExp(request.json.pattern).test(name))\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R034-redos"]
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], f"R034-redos mismatch: {hits}"
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_regex_injection_literal_and_safe_patterns_quiet():
+    """R034-redos must not fire on literal/constant/bare-variable patterns, a
+    request-derived SUBJECT as second argument, string .match(), regex literals,
+    or non-sink calls."""
+    src = (
+        "re.search(r'\\d+', request.body.text)\n"
+        "re.match('^[a-z]+$', username)\n"
+        "re.compile(EMAIL_PATTERN)\n"
+        "rx = re.compile(SAFE_RE_48)\n"
+        "re.findall(term, request.body.text)\n"
+        "m = re.match(user_filter, text)\n"
+        "page = re.search(pattern_var, html)\n"
+        "re.sub(LITERAL_RE, '', request.form['html'])\n"
+        "re.compile(f'^{user}$', re.IGNORECASE)\n"
+        "reversed(items)\n"
+        "related_url.match(rex)\n"
+        "new RegExp('^admin$')\n"
+        "const re = new RegExp(USER_INPUT_PATTERN)\n"
+        "cleaned = body.replace(/bad/g, '')\n"
+        "const m = data.match(/^\\d+$/)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R034-redos"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1082,6 +1129,7 @@ def test_every_rule_has_test_exposure():
         "R022-ssti", "R023-xxe", "R024-jwt", "R025-pw", "R026-upload",
         "R027-massassig", "R028-nosql", "R029-ldap", "R030-xpath",
         "R031-ssrf-js", "R032-cmd-node", "R033-protopoll",
+        "R034-redos",
     }
     assert exposed <= rids
     uncovered = rids - exposed
