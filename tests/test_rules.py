@@ -1487,6 +1487,60 @@ def test_math_random_plain_or_crypto_quiet():
     assert not [i for i in issues if i.rule_id == "R043-math-random"], issues
 
 
+def test_storage_security_key_or_value_flagged():
+    """R044-storage flags writes of security-named keys or values to
+    localStorage / sessionStorage — setItem, bracket-key and dot-key
+    assignment forms (CWE-922)."""
+    src = (
+        "localStorage.setItem('token', res.data.token);\n"
+        'localStorage.setItem("accessToken", auth.token);\n'
+        "sessionStorage.setItem('jwt', payload);\n"
+        "localStorage.setItem('refresh_token', getToken());\n"
+        "localStorage.setItem('csrf_token', csrf);\n"
+        "localStorage.setItem('user_token', v);\n"
+        "localStorage.setItem('secret_key', v);\n"
+        "localStorage['session_id'] = sid;\n"
+        "sessionStorage['user_token'] = token;\n"
+        "localStorage.jwt = res.accessToken;\n"
+        "localStorage.access_token = x;\n"
+        "localStorage.setItem('userData', accessToken);\n"
+        "localStorage.setItem('k', apiKey);\n"
+        "localStorage.setItem(`auth_token`, v);\n"
+        "localStorage.password = pwd;\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R044-storage"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), (
+        f"R044-storage mismatch: {hits}"
+    )
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_storage_generic_or_read_stays_quiet():
+    """R044-storage stays quiet for generic keys (theme/cart/last_page/visited),
+    key-management reads (getItem/removeItem/clear), non-write comparisons,
+    word-substring keys like 'tokenizer', and values re-read from the same
+    storage (a move, not a new sink)."""
+    src = (
+        "localStorage.setItem('theme', 'dark');\n"
+        "localStorage.setItem('tokenizer', v);\n"
+        "localStorage.setItem('cart', JSON.stringify(items));\n"
+        "localStorage.removeItem('token');\n"
+        "localStorage.clear();\n"
+        "const t = localStorage.getItem('token');\n"
+        "x = localStorage.token;\n"
+        "localStorage.token == saved;\n"
+        "const ok = localStorage.token != null;\n"
+        "localStorage.setItem('count', n + 1);\n"
+        "sessionStorage.setItem('visited', '1');\n"
+        "localStorage.setItem('last_page', '/home');\n"
+        "localStorage.setItem('k', localStorage.getItem('token'));\n"
+        "localStorage.authHeader();\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R044-storage"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1656,7 +1710,7 @@ def test_every_rule_has_test_exposure():
         "R031-ssrf-js", "R032-cmd-node", "R033-protopoll",
         "R034-redos", "R035-hdrinj", "R036-loginj", "R037-credurl",
         "R038-perm", "R039-nav", "R040-tabnab", "R041-postmsg",
-        "R042-websock", "R043-math-random",
+        "R042-websock", "R043-math-random", "R044-storage",
     }
     assert exposed <= rids
     uncovered = rids - exposed

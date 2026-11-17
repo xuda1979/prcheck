@@ -223,7 +223,10 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   `System.out`/`err` `.println`/`.print`/`.printf`), insecure file
   permissions (world-writable chmod 0o777/0o666/0o1777, setuid/setgid
   0o4777, makedirs/mkdir `mode=…`, quoted `['chmod', '777', …]`, and
-  `umask(0)` masking disabled).
+  `umask(0)` masking disabled), browser storage of security-sensitive
+  values (tokens/sessions/credentials written to `localStorage`/
+  `sessionStorage` via `setItem`, bracket-key or dot-key assignment —
+  readable by any injected script, vs. httpOnly cookies).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

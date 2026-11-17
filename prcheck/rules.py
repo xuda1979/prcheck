@@ -1083,6 +1083,61 @@ _RULE_TUPLES = [
         r")",
         "Math.random() is not cryptographically secure — an attacker who observes one output (or a partial PRNG seed) can predict tokens, OTPs and sessions (CWE-338). Use crypto.getRandomValues / crypto.randomUUID, or the server-side secrets module, for anything security-related",
     ),
+    (
+        "R044-storage",
+        "security",
+        "medium",
+        "Security-sensitive token/credential persisted to localStorage/sessionStorage",
+        # XSS-exposed persistence (CWE-922): any XSS then reads the token straight
+        # off the storage and nothing in the browser can revoke or scope it the
+        # way httpOnly cookies can. Fires on a single added line for a *write* to
+        # localStorage/sessionStorage whose key or value is security-named:
+        #   (A) setItem with a security-named key ('token', 'access_token',
+        #       'jwt', 'session_id', 'csrf_token', 'user_token', …) — the
+        #       R002-style compound-name idiom, so underscore-joined keys and
+        #       plain 'token' fire while 'tokenizer'/'theme' stay quiet.
+        #   (B) setItem with a generic key but a security-named *value*
+        #       (accessToken / apiKey / payload-derived token).  Read-backs and
+        #       key management (getItem/removeItem/clear, comparison, method
+        #       names like localStorage.tokenizer()) stay quiet.
+        #   (C1) bracket assignment: localStorage['session_id'] = … /
+        #       sessionStorage['user_token'] = …
+        #   (C2) dot-key write: localStorage.jwt = … / sessionStorage.accessToken
+        #       = …  (a property write, not the read form localStorage.token).
+        # Keys/stores that are clearly generic ('theme', 'cart', 'last_page',
+        # 'visited') never match, and a value fed from localStorage.getItem()
+        # itself (a move, not a new sink) stays quiet.
+        r"(?i)\b(?:localStorage|sessionStorage)\b\s*(?:"
+        # (A) setItem with a security-named key
+        r"\.\s*setItem\s*\(\s*['\"`][^'\"`\n]*"
+        r"(?:(?<=_)|(?<![A-Za-z0-9_]))(?:session(?:[_-]?id)?|jwt|csrf|"
+        r"access[_-]?token|refresh[_-]?token|id[_-]?token|oauth[_-]?token|"
+        r"auth(?:[_-]?token)?|credential|apikey|api[_-]?key|secret|"
+        r"passw(?:ord|d)|private[_-]?key|token)(?:\b|(?=[_-]))"
+        r"[^'\"`\n]*['\"`]"
+        r"|"
+        # (B) setItem with a generic key but a security-named value
+        r"\.\s*setItem\s*\(\s*['\"`][^'\"`\n]*['\"`]\s*,\s*[^'\"`;\n]*"
+        r"\b(?:session(?:[_-]?id)?|jwt|csrf|access[_-]?token|refresh[_-]?token|"
+        r"id[_-]?token|oauth[_-]?token|auth(?:[_-]?token)?|credential|"
+        r"apikey|api[_-]?key|secret|passw(?:ord|d)|private[_-]?key|token)\b"
+        r"|"
+        # (C1) bracket key write
+        r"\[\s*['\"`][^'\"`\n]*"
+        r"(?:(?<=_)|(?<![A-Za-z0-9_]))(?:session(?:[_-]?id)?|jwt|csrf|"
+        r"access[_-]?token|refresh[_-]?token|id[_-]?token|oauth[_-]?token|"
+        r"auth(?:[_-]?token)?|credential|apikey|api[_-]?key|secret|"
+        r"passw(?:ord|d)|private[_-]?key|token)(?:\b|(?=[_-]))"
+        r"[^'\"`\n]*['\"`]\s*\]\s*=(?!=)"
+        r"|"
+        # (C2) dot-key write
+        r"\.\s*(?:session(?:[_-]?id)?|jwt|csrf|access[_-]?token|refresh[_-]?token|"
+        r"id[_-]?token|oauth[_-]?token|auth(?:[_-]?token)?|credential|"
+        r"apikey|api[_-]?key|secret|passw(?:ord|d)|private[_-]?key|token)"
+        r"\b\s*=(?!=)"
+        r")",
+        "Tokens, sessions and credentials in localStorage/sessionStorage are readable by any injected script and survive to be exfiltrated — keep bearer material in an httpOnly, Secure, SameSite cookie (or a memory-only holder) so XSS cannot reach it (CWE-922)",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
