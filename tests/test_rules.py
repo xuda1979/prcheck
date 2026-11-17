@@ -1378,6 +1378,61 @@ def test_postmsg_specific_or_same_origin_target_quiet():
     assert not [i for i in issues if i.rule_id == "R041-postmsg"], issues
 
 
+def test_websocket_cleartext_or_dynamic_endpoint_flagged():
+    """R042-websock flags (A) a cleartext 'ws://…' WebSocket literal — the
+    connection is sent unencrypted (CWE-319) — and (B) a WebSocket opened
+    against a request/req/ctx/query/params/payload/event-derived or
+    URL-search-derived URL, or a url-named variable / expression, which lets an
+    attacker redirect the socket endpoint (CWE-918/939)."""
+    src = (
+        "const ws = new WebSocket('ws://localhost:8080/data');\n"
+        'ws = new WebSocket("ws://chat.example.com");\n'
+        "const sock = new WebSocket(request.query.url);\n"
+        "ws = new WebSocket(req.params.socket);\n"
+        "const ws = new WebSocket(ctx.request.body.url);\n"
+        "conn = new WebSocket(searchParams.get('target'));\n"
+        "conn = new WebSocket(new URLSearchParams(location.search).get('host'));\n"
+        "ws = new WebSocket(location.search.split('?')[1]);\n"
+        "ws = new WebSocket(endpoint);\n"
+        "new WebSocket(wsUrl);\n"
+        "new WebSocket(origin + '/ws');\n"
+        "new WebSocket(callbackUrl);\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R042-websock"]
+    assert [i.line for i in hits] == list(range(1, 13)), f"R042-websock mismatch: {hits}"
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_websocket_wss_literal_or_safe_origin_quiet():
+    """R042-websock stays quiet for an encrypted 'wss://…' literal, a
+    SCREAMING_CASE endpoint constant, a template fed from process.env, host-only
+    location reads (window.location.host / protocol-based scheme derivation),
+    a generic/await-derived variable, null/empty/one-arg forms, and global
+    WebSocket.prototype usage (R039/R040 SCREAMING + location.* convention)."""
+    src = (
+        "const ws = new WebSocket('wss://api.example.com/socket');\n"
+        'new WebSocket("wss://secure.example.com");\n'
+        "new WebSocket(WS_ENDPOINT);\n"
+        "new WebSocket(DEFAULT_SOCKET_URL);\n"
+        "new WebSocket(`wss://${process.env.WS_URL}/socket`);\n"
+        "new WebSocket(`wss://${host}/ws`);\n"
+        "new WebSocket();\n"
+        "const chat = io('wss://chat.example.com');\n"
+        "new WebSocket(window.location.host + '/ws');\n"
+        "new WebSocket((window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host);\n"
+        "ws = new WebSocket(connection);\n"
+        "new WebSocket(null);\n"
+        "const ws = new WebSocket('wss://' + window.location.host + '/ws');\n"
+        "WebSocket.prototype.send(data);\n"
+        "var WS = new WebSocket('wss://news.example.com/live');\n"
+        "const ws = new WebSocket('');\n"
+        "const ws = new WebSocket(await getConn());\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R042-websock"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1547,6 +1602,7 @@ def test_every_rule_has_test_exposure():
         "R031-ssrf-js", "R032-cmd-node", "R033-protopoll",
         "R034-redos", "R035-hdrinj", "R036-loginj", "R037-credurl",
         "R038-perm", "R039-nav", "R040-tabnab", "R041-postmsg",
+        "R042-websock",
     }
     assert exposed <= rids
     uncovered = rids - exposed

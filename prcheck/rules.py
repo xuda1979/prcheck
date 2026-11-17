@@ -1035,6 +1035,33 @@ _RULE_TUPLES = [
         r")",
         "postMessage(x, '*') leaks the message to every origin, and a targetOrigin built from request/URL-derived values lets a malicious site receive it — always pass an explicit https: origin (or the sender's e.origin after a check) and never let user input pick the destination window",
     ),
+    (
+        "R042-websock",
+        "security",
+        "medium",
+        "WebSocket endpoint from cleartext ws:// literal or request/URL-derived URL",
+        # (A) cleartext literal: new WebSocket('ws://…') — an unencrypted
+        # connection sent in the clear (CWE-319). (B) dynamic URL: the argument
+        # is no quoted literal / template / leading-space form, but carries a
+        # request/ctx/query/params/searchParams/location.search derivation or a
+        # url-ish keyword identifier — attacker-controlled WebSocket endpoint
+        # (CWE-918/939), so origin/host checks can be redirected. SCREAMING
+        # constants and `location.*` property reads (host/protocol/origin/href)
+        # stay quiet (R039/R040 convention); (?!['\"`\s]) pins the argument
+        # head so a backtracked \s* can't slip a safe value past the guard.
+        r"(?i)(?:"
+        r"(?:new\s+)?WebSocket\s*\(\s*['\"]ws://"
+        r"|"
+        r"(?:new\s+)?WebSocket\s*\(\s*(?!['\"`\s])"
+        r"[^,;)\n]*?(?:"
+        r"\b(?:request|req|ctx|query|params|payload|event)\b\s*(?:\.|\[)"
+        r"|\b(?:URL)?searchparams\b\s*\.\s*get\s*\("
+        r"|(?-i:\blocation\.search\b)"
+        r"|(?-i:(?=[A-Za-z_]\w*[a-z]))[\w.\[\]]*?(?<!location\.)(?:url|uri|endpoint|socket|target|origin|link|href|callback|webhook)"
+        r")"
+        r")",
+        "A WebSocket opened against 'ws://…' sends traffic unencrypted, and one opened against a request/URL-derived host lets an attacker redirect the connection (SSRF / endpoint poisoning) — always use wss:// against a pinned, allow-listed https: origin and never pass user input as the socket URL",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

@@ -202,6 +202,10 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   `etree.XPath`/`XPathEvaluator` compilations fed request-derived queries),
   client-side SSRF (JS `fetch`/`axios`/`got`/Node `http(s)`/`request` and
   `XMLHttpRequest().open(method, url)` sinks fed request-derived URLs),
+  WebSocket endpoint from cleartext `ws://` literal or request/URL-derived URL
+  (`new WebSocket(…)` against request/ctx/query/search-derived input or a
+  url-named variable, vs. trusted `wss://` literals and location/scheme-derived
+  hosts),
   prototype pollution (JS `Object.assign`/lodash `merge` family/jQuery
   `extend` fed request-derived objects, or direct `__proto__` assignment of
   request input), regex injection / ReDoS (Python `re.*` sinks
