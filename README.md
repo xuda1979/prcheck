@@ -169,7 +169,9 @@ type, using `GH_TOKEN`/`GITHUB_TOKEN` when present (private repos). An inline
 The rule library lives in `prcheck/rules.py` and is a plain list of
 (id, category, severity, summary, regex, hint). Categories:
 
-- **Security** — no-auth routes, hardcoded secrets, TLS disable, eval/exec,
+- **Security** — no-auth routes, hardcoded secrets (incl. credentials embedded in
+  URL / connection-string literals such as `postgres://user:pass@host` or
+  `jdbc:…?user=x&password=y`), TLS disable, eval/exec,
   SQL injection, insecure deserialization (pickle/cPickle/marshal/joblib,
   `yaml.load`/`full_load`/`unsafe_load`, `np.load(allow_pickle=True)`,
   `torch.load`, `read_pickle`, `shelve`), dependency changes, CORS, privilege

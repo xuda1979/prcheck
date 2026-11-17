@@ -1089,6 +1089,50 @@ def test_log_injection_static_and_non_sink_quiet():
     assert not [i for i in issues if i.rule_id == "R036-loginj"], issues
 
 
+def test_cred_in_url_userinfo_flagged():
+    """R037-credurl flags literals that embed real credentials: URI userinfo with a
+    non-empty password (postgres/redis/mysql/mongodb/amqps/…://user:pass@host) and
+    a credential query param in a URL (jdbc:…?user=x&password=y, ?token=…)
+    (CWE-798)."""
+    src = (
+        'DATABASE_URL = "postgres://admin:Secret123@db.example.com:5432/app"\n'
+        'redis_url = "redis://:passw0rd@localhost:6379/0"\n'
+        'conn = psycopg2.connect("postgres://myuser:mypass@10.0.0.1/db")\n'
+        'mongodb_url = "mongodb://user:secret@cluster0.example.com:27017/db"\n'
+        'amqp_url = "amqps://guest:guest@rabbit.example.com:5671//"\n'
+        'String url = "jdbc:mysql://localhost:3306/db?user=admin&password=hunter2";\n'
+        'auth_url = "https://api.example.com/v1?token=AbCdEf1234"\n'
+        'db_dsn = "mysql://root:rootpw@localhost/mydb"\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R037-credurl"]
+    assert [i.line for i in hits] == list(range(1, 9)), f"R037-credurl mismatch: {hits}"
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_cred_in_url_legit_and_dynamic_quiet():
+    """R037-credurl must not fire on env-var reads, host:port URLs, bare user@host
+    (no password), dynamic f-string/% /template placeholders, non-credential query
+    params, data: URIs, or empty credential values."""
+    src = (
+        'DATABASE_URL = os.environ["DATABASE_URL"]\n'
+        'url = "postgres://localhost:5432/app"\n'
+        'base = "https://example.com/api/v1"\n'
+        'api = "http://user@example.com/profile"\n'
+        'f = f"postgres://{user}:{passwd}@{host}/db"\n'
+        's = "mysql://user:%s@host/db" % (pwd,)\n'
+        'target = "https://example.org/login?next=%2Fdashboard"\n'
+        'img = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAE=="\n'
+        'host = "db.internal:5432"\n'
+        'url2 = "https://example.com:8080/healthz"\n'
+        'const s = `postgres://${user}:${p}@host/db`\n'
+        'cb = "http://example.com/callback?code=1234"\n'
+        'empty = "https://example.com/path?password="\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R037-credurl"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1256,7 +1300,7 @@ def test_every_rule_has_test_exposure():
         "R022-ssti", "R023-xxe", "R024-jwt", "R025-pw", "R026-upload",
         "R027-massassig", "R028-nosql", "R029-ldap", "R030-xpath",
         "R031-ssrf-js", "R032-cmd-node", "R033-protopoll",
-        "R034-redos", "R035-hdrinj", "R036-loginj",
+        "R034-redos", "R035-hdrinj", "R036-loginj", "R037-credurl",
     }
     assert exposed <= rids
     uncovered = rids - exposed

@@ -881,6 +881,30 @@ _RULE_TUPLES = [
         r")",
         "A request-derived value is written unfiltered to a logging or console sink — Python logger/log/logging .debug/.info/.warning/.error/.exception/.critical or print(), Node/JS console.log/warn/error/info, Java System.out/err.println — an attacker can inject CRLF/control chars to forge fake log lines or poison log-based monitoring (log injection / log forging/CWE-117)",
     ),
+    (
+        "R037-credurl",
+        "security",
+        "high",
+        "Hardcoded credential embedded in a URL / connection-string literal",
+        # Fires on a single added line when (CWE-798): a URL/DSN literal embeds
+        # real credentials. (A) URI userinfo: scheme://user[:password]@host — the
+        # colons+@ requirements make a NON-EMPTY password mandatory, so a bare
+        # user@host (no password, e.g. https://user@example.com) and a host:port
+        # (https://example.com:8080) stay quiet; the {}% exclusions keep dynamic
+        # templates (f"…{user}:{pwd}@…", "…%s@…" % creds) quiet. (B) a credential
+        # query param: scheme://host/path?…&password=…&… (covers jdbc
+        # mysql://…?user=x&password=y). The `"` restriction on [^"'\s]* bounds
+        # the scan to the quoted literal, so a later unrelated
+        # password=variable= on the same line cannot be pulled in; empty values
+        # (?key=) need 4+ value chars. R001/R002 own key/value assignment forms
+        # (KEY = "…"); this rule owns credential-in-literal form.
+        r"(?i)(?:"
+        r"\b[a-z][a-z0-9+.\-]{0,40}://[^\"'\s@/{}&?%]*:[^\"'\s@/{}&?%]+@[^\"'\s/?#{}]+"
+        r"|\b[a-z][a-z0-9+.\-]{0,40}://[^\"'\s]*"
+        r"\b(?:password|passwd|pwd|secret|secret_key|token|api_key)=[A-Za-z0-9_.\-!@$^*+~]{4,}"
+        r")",
+        "A URL or connection string embeds a plaintext credential (postgres://user:pass@host / mysql URL / jdbc?user=..&password=.. / ?token=..) — an attacker with read access to the repo captures the secret; move credentials to env vars/secret manager and keep only placeholders in code (hardcoded credential/CWE-798)",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
