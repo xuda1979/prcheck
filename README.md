@@ -183,7 +183,9 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   dynamic/executable-scheme URLs (window.open / location.href / location.assign|replace /
   document.location fed javascript:/html-data: literals, request-derived URLs, or url-named
   variables — DOM XSS / open redirect), reverse tabnabbing (target=_blank
-  anchors / window.open lacking rel=noopener/noreferrer), SSRF (outbound fetches of
+  anchors / window.open lacking rel=noopener/noreferrer), cross-origin message
+  disclosure (postMessage with a wildcard `'*'` or a request/URL-derived
+  targetOrigin), SSRF (outbound fetches of
   request-derived URLs via requests/httpx/urllib/aiohttp, including
   session/client-object receivers and `aiohttp.request(method, url)`), debug mode / DEBUG-level logging, CSRF protection
   disabled, committed private key material (PEM key blocks), server-side

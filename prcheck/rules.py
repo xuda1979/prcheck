@@ -1009,6 +1009,32 @@ _RULE_TUPLES = [
         r")",
         "Links/views opened in a new tab (_blank) control the new page and can navigate the opener to a phishing site — guard the hand-off with rel=noreferrer (covers noopener) or, for window.open, add noopener/noreferrer to the features string",
     ),
+    (
+        "R041-postmsg",
+        "security",
+        "medium",
+        "postMessage with wildcard '*' or attacker-influenced targetOrigin",
+        # (A) targetOrigin literal "*": any origin can receive / inject into the
+        # cross-document message. (B) dynamic targetOrigin: the second argument
+        # is no literal, no array (Web Worker transfer list), no e./location.
+        # origin echo, but carries a request/ctx/search-derivation marker or a
+        # url-ish keyword. SCREAMING_CASE constants stay quiet (R039/R040
+        # convention); (?!\s) pins the lookahead to the argument head so a
+        # backtracked "\s*" can't slip a safe origin past the guard.
+        r"(?i)(?:"
+        r"\bpostMessage\s*\(\s*[^;\n]*?,\s*['\"]\s*\*\s*['\"]"
+        r"|"
+        r"\bpostMessage\s*\(\s*[^;\n]*?,\s*(?!\s)"
+        r"(?!['\"]|\[|\b(?:e|event|evt)\b\.origin\b|(?:window\.)?(?:document\.)?location\.origin\b)"
+        r"[^,;)\n]*?(?:"
+        r"\b(?:request|req|ctx|event)\b\s*(?:\.|\[)"
+        r"|\b(?:URL)?searchparams\b\s*\.\s*get\s*\("
+        r"|(?-i:\blocation\.search\b)"
+        r"|(?-i:(?=[A-Za-z_]\w*[a-z]))[\w.\[\]]*?(?:origin|url|uri|link|href|endpoint|target|callback|webhook)[\w.\[\]]*"
+        r")"
+        r")",
+        "postMessage(x, '*') leaks the message to every origin, and a targetOrigin built from request/URL-derived values lets a malicious site receive it — always pass an explicit https: origin (or the sender's e.origin after a check) and never let user input pick the destination window",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

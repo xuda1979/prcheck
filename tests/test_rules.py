@@ -1319,6 +1319,65 @@ def test_tabnabbing_rel_noopener_or_safe_target_quiet():
     assert not [i for i in issues if i.rule_id == "R040-tabnab"], issues
 
 
+def test_postmsg_wildcard_or_dynamic_targetorigin_flagged():
+    """R041-postmsg flags (A) postMessage with a wildcard '*' targetOrigin and
+    (B) a dynamic targetOrigin derived from request/req/ctx/event, URL search
+    params, or a url-named variable — the message payload is disclosed to or
+    injectable by any/attacker-controlled origin (CWE-940 / CWE-345)."""
+    src = (
+        'window.postMessage(payload, "*");\n'
+        "parent.postMessage(msg, '*');\n"
+        'targetWindow.postMessage(JSON.stringify(x), "*");\n'
+        'opener.postMessage(data, "*");\n'
+        'iframe.contentWindow.postMessage(userData, "*");\n'
+        "window.postMessage(data, request.query.origin);\n"
+        "target.postMessage(msg, req.query.targetUrl);\n"
+        "win.postMessage(x, returnUrl);\n"
+        "frame.postMessage(d, searchParams.get('target'));\n"
+        "window.postMessage(JSON.stringify(msg), new URLSearchParams(location.search).get('target'));\n"
+        "parent.postMessage(cb, ctx.request.target);\n"
+        "window.opener.postMessage(userData, userOrigin);\n"
+        "postMessage(text, callbackUrl + '/api');\n"
+        "postMessage(data, endpoint)\n"
+        "window.postMessage(x, origin)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R041-postmsg"]
+    assert [i.line for i in hits] == list(range(1, 16)), f"R041-postmsg mismatch: {hits}"
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_postmsg_specific_or_same_origin_target_quiet():
+    """R041-postmsg stays quiet for a literal specific-origin targetOrigin, the
+    sender's own origin (window/document/location.origin), a Web Worker /
+    service-worker transfer list array, an e./event.origin echo-back, a
+    SCREAMING_CASE origin constant, single-argument/single-arg-object forms,
+    and frames/messages unrelated to sending (addEventListener, guards without
+    a postMessage call)."""
+    src = (
+        'window.postMessage(data, "https://app.example.com");\n'
+        "content.postMessage(data, 'https://trusted.example.com/callback');\n"
+        "parent.postMessage(data, window.location.origin);\n"
+        "window.postMessage(data, document.location.origin);\n"
+        "postMessage(data, location.origin);\n"
+        'postMessage(data, "/");\n'
+        'postMessage(data, "https://app.example.com" + path);\n'
+        "postMessage(data);\n"
+        "this.postMessage(result);\n"
+        "worker.postMessage(data, [buf]);\n"
+        "runner.postMessage(payload, [transfer]);\n"
+        "this.postMessage({ type: 'ready' });\n"
+        "target.postMessage(data, e.origin);\n"
+        "if (e.origin === 'https://app.example.com') postMessage(reply, event.origin);\n"
+        "postMessage(data, APP_ORIGIN);\n"
+        "addEventListener('message', (e) => handle(e.data));\n"
+        "parent.postMessage('hello');\n"
+        "if (a && b) { worker.postMessage() }\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R041-postmsg"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1487,7 +1546,7 @@ def test_every_rule_has_test_exposure():
         "R027-massassig", "R028-nosql", "R029-ldap", "R030-xpath",
         "R031-ssrf-js", "R032-cmd-node", "R033-protopoll",
         "R034-redos", "R035-hdrinj", "R036-loginj", "R037-credurl",
-        "R038-perm", "R039-nav", "R040-tabnab",
+        "R038-perm", "R039-nav", "R040-tabnab", "R041-postmsg",
     }
     assert exposed <= rids
     uncovered = rids - exposed
