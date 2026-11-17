@@ -720,6 +720,39 @@ _RULE_TUPLES = [
         r")",
         "A Node child_process call builds its shell command from a variable / request input / interpolation; exec always runs a shell — validate or whitelist the command and avoid shell:true / sh -c patterns (command injection/CWE-78)",
     ),
+    (
+        "R033-protopoll",
+        "security",
+        "high",
+        "Prototype pollution: merge/assign of a request-derived object or direct __proto__ assignment",
+        # Fires on a single added line when (CWE-1321):
+        #   (A) a JS merge/extend sink — Object.assign, lodash _ merge|mergeWith|
+        #       defaultsDeep|extend, jQuery/$ .extend — has a request-derived
+        #       argument (req/request/ctx/event accessor -> .field / ['field'] /
+        #       ?.field, incl. spread ...req.query and JSON.parse(req.body)
+        #       anywhere in the argument list).
+        #   (B) a direct __proto__ key assignment (obj['__proto__'] = … or
+        #       obj.__proto__ = …) whose RHS is request-derived.
+        # A request-derived payload is required (no bare-variable heuristic) so
+        # literal objects, SCREAMING_CASE constants, pandas df.merge, git merge,
+        # __proto__ reads / null resets, safe deep-clones and plain
+        # spread-into-literal stay quiet.
+        r"(?i)(?:"
+        # (A) merge/extend sinks — Object.assign / lodash (_|lodash) merge family /
+        #     jQuery ($|jQuery) .extend — fed a request-derived object argument
+        #     (accessor .field / ['field'] / ?.field; spread and JSON.parse(...)
+        #     anywhere in the argument list count).
+        r"(?:(?<![\w.])Object\s*\.\s*assign\s*\(|"
+        r"(?<![\w.])(?:_|lodash)\s*\.\s*(?:merge(?:With)?|defaultsDeep|extend)\s*\(|"
+        r"(?<![\w.])(?:\$|jQuery)\s*\.\s*extend\s*\()"
+        r"(?=[^\n]*\b(?:req|request|ctx|event)\b\s*(?:\?\.|\.|\[))"
+        r"|"
+        # (B) direct __proto__ key assignment fed a request-derived value.
+        r"(?:\w+\s*\[\s*['\"]__proto__['\"]\s*\]\s*=|\.\s*__proto__\s*=)"
+        r"(?=[^\n]*\b(?:req|request|ctx|event)\b\s*(?:\?\.|\.|\[))"
+        r")",
+        "A JS merge/extend (Object.assign / lodash merge family / jQuery extend) is fed a request-derived object, or a __proto__ key is assigned request-derived data — an attacker can pollute the prototype of these objects (prototype pollution/CWE-1321)",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

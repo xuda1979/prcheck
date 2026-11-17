@@ -193,7 +193,10 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   request-derived filters), XPath injection (lxml `.xpath()` calls or
   `etree.XPath`/`XPathEvaluator` compilations fed request-derived queries),
   client-side SSRF (JS `fetch`/`axios`/`got`/Node `http(s)`/`request` and
-  `XMLHttpRequest().open(method, url)` sinks fed request-derived URLs).
+  `XMLHttpRequest().open(method, url)` sinks fed request-derived URLs),
+  prototype pollution (JS `Object.assign`/lodash `merge` family/jQuery
+  `extend` fed request-derived objects, or direct `__proto__` assignment of
+  request input).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

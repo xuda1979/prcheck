@@ -871,6 +871,50 @@ def test_cmd_node_child_process_literals_and_safe_spawns_quiet():
     assert not [i for i in issues if i.rule_id == "R032-cmd-node"], issues
 
 
+def test_prototype_pollution_request_merges_flagged():
+    """R033-protopoll flags JS merge/extend sinks fed request-derived objects
+    (Object.assign / lodash merge family / jQuery extend) and direct __proto__
+    assignment from request input (CWE-1321)."""
+    src = (
+        "Object.assign({}, req.query)\n"
+        "_.merge(config, req.body)\n"
+        "const merged = _.defaultsDeep({}, request.json)\n"
+        "$.extend(true, {}, request.body)\n"
+        "jQuery.extend({}, ctx.request.query)\n"
+        "const merged = _.mergeWith(target, req.body, customizer)\n"
+        "Object.assign({}, ...req.body)\n"
+        "const merged = _.merge(baseOpts, sanitize(req.query))\n"
+        "obj['__proto__'] = req.body\n"
+        "item.__proto__ = JSON.parse(request.body)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R033-protopoll"]
+    assert [i.line for i in hits] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], f"R033-protopoll mismatch: {hits}"
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_prototype_pollution_literals_and_safe_merges_quiet():
+    """R033-protopoll must not fire on literal objects, SCREAMING_CASE constants,
+    pandas/git merges, __proto__ reads / null resets, safe deep-clones, or plain
+    spread-into-literal."""
+    src = (
+        "Object.assign({}, DEFAULTS)\n"
+        "const cfg = _.merge(baseConf, BASE_CONFIG)\n"
+        "df.merge(request.body, on='id', how='inner')\n"
+        "git merge(requestedBranch)\n"
+        "obj['__proto__']\n"
+        "obj['__proto__'] = null\n"
+        "Object.setPrototypeOf(thing, proto)\n"
+        "_.cloneDeep(request.body)\n"
+        "const copia = structuredClone(payload)\n"
+        "Object.assign({}, { name: 'x', role: 'admin' })\n"
+        "user.profile = { role: 'admin' }\n"
+        "const merged = { ...request.body }\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R033-protopoll"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1037,7 +1081,7 @@ def test_every_rule_has_test_exposure():
         "R017-redirect", "R018-debug", "R019-csrf", "R020-pem", "R021-ssrf",
         "R022-ssti", "R023-xxe", "R024-jwt", "R025-pw", "R026-upload",
         "R027-massassig", "R028-nosql", "R029-ldap", "R030-xpath",
-        "R031-ssrf-js", "R032-cmd-node",
+        "R031-ssrf-js", "R032-cmd-node", "R033-protopoll",
     }
     assert exposed <= rids
     uncovered = rids - exposed
