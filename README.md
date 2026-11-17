@@ -395,7 +395,22 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   CWE-22; fully-literal paths, SCREAMING_SNAKE constants, ALL_CAPS concat
   operands, parent + literal second-arg `File` ctor calls, classpath
   `getResourceAsStream` lookups, UUID/timestamp generation and getter-only
-  filename expressions (`part.getSubmittedFileName()`) stay quiet).
+  filename expressions (`part.getSubmittedFileName()`) stay quiet), and
+  Java unsafe reflection
+  (`Class.forName(...)`, `ClassLoader`-family `loadClass`/`defineClass` and
+  `getMethod`/`getDeclaredMethod`/`getConstructor`/`getDeclaredConstructor`
+  lookups — including `obj.getClass().getDeclaredMethod(...)` receiver chains —
+  fed a `request.*` accessor (`getParameter`/`getHeader`/`getQueryString`/
+  `getRequestURI`), a `'...' + lowercaseIdentifier` concat or a bare lowercase
+  variable holding the class/member name — an attacker who controls the
+  selection can instantiate arbitrary classes / invoke client-chosen methods,
+  enabling gadget-driven RCE — CWE-470; literal `"com.example.MyClass"` names,
+  SCREAMING_SNAKE constants, class-literal names
+  (`Class.forName(Object.class.getName())`), `ClassLoader` acquisition
+  (`new URLClassLoader(...)`, `Thread.currentThread().getContextClassLoader()`,
+  `getClass().getClassLoader()`), plain `(Type) clazz.newInstance()` creation,
+  `clazz.getDeclaredMethods()[0]` array access and custom receivers like
+  `mapper.getMethod("toString")` stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

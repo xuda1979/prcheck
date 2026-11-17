@@ -1794,6 +1794,53 @@ _RULE_TUPLES = [
         r")",
         "A Java file-path sink built from client-controlled input — CWE-22 path traversal. new File-family constructors (File/FileInputStream/FileOutputStream/FileReader/FileWriter/RandomAccessFile), Files.* helpers over Paths.get(...) (readAllBytes/readAllLines/readString/write/copy/newInputStream/newBufferedReader/newBufferedWriter/lines/delete/move/createDirectories/createFile) and upload writes (fileItem.write/part.write/multipartFile.transferTo) resolve the target from a request accessor (getParameter/getHeader/getQueryString/getRequestURI), a '+' concatenation or a filename-named variable: a '..'-laden or absolute value selects files outside the sandbox, so an attacker can read secrets, overwrite configs or write a file into a deployable location. Validate and normalize the path, canonicalize it with File.getCanonicalPath()/Paths.toRealPath() and reject values escaping the allowed base directory; derive upload names on the server side instead of trusting client filename",
     ),
+    (
+        "R064-javareflect",
+        "security",
+        "high",
+        "Java reflection sink (Class.forName / ClassLoader loadClass / method or constructor lookup) fed client-controlled or concatenated input (unsafe reflection)",
+        # CWE-470 (Use of Externally-Controlled Input to Select Classes or
+        # Code): the reflection entry points — Class.forName(name),
+        # ClassLoader-family loadClass/defineClass, and method/constructor
+        # lookup via getMethod/getDeclaredMethod/getConstructor/
+        # getDeclaredConstructor on any lowercase receiver (including
+        # obj.getClass() chains) — resolve a class/member selected from a
+        # request accessor (getParameter/getHeader/getQueryString/
+        # getRequestURI), a '+' concatenation of a lowercase identifier, or
+        # a bare lowercase variable holding the name.  Only the
+        # Class.forName-over-a-lowercase-variable and loadClass-over-a-lowercase-variable
+        # forms accept a bare variable (request.getParameter(...) results
+        # only reach these via a wide [^)]* scan); the method/constructor
+        # lookups require an explicit request accessor or '+' concat
+        # (their arg travels through a [^;\n]* span where a bare name could
+        # be a fixed member name like "execute", which stays quiet).
+        # Attacker-controlled names can instantiate arbitrary reachable
+        # classes, invoke unexpected methods/constructors or (with a
+        # defineClass/bytecode path) load injected bytecode — gadget-driven
+        # RCE, auth-bypass state switches or internal component abuse.
+        # Literal "com.example.MyClass" names, SCREAMING_SNAKE constants,
+        # Class.forName(Object.class.getName()) class-literal names,
+        # receiver acquisition (new URLClassLoader(...),
+        # Thread.currentThread().getContextClassLoader(),
+        # getClass().getClassLoader()), `(Type) clazz.newInstance()`
+        # instance creation, `clazz.getDeclaredMethods()[0]` array access
+        # and `mapper.getMethod("toString")`-style custom receivers (non
+        # .class/obj.getClass() chains not selecting a reflection member by
+        # client-controlled name) stay quiet.  Java sources are
+        # case-sensitive CamelCase, so no inline flag (same convention as
+        # R053-R063).  Single-line contract.
+        r"(?:"
+        r"\bClass\s*\.\s*forName\s*\([^)\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\("
+        r"|\bClass\s*\.\s*forName\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\bClass\s*\.\s*forName\s*\(\s*(?!['\"]|\d|[A-Z])(?=[a-z_]\w*[a-z])(?:[a-z_]\w*)"
+        r"|\b[a-z_]\w*(?:\s*\.\s*[a-z_]\w*\s*\(\s*\))*\s*\.\s*(?:getMethod|getDeclaredMethod|getConstructor|getDeclaredConstructor)\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\("
+        r"|\b[a-z_]\w*(?:\s*\.\s*[a-z_]\w*\s*\(\s*\))*\s*\.\s*(?:getMethod|getDeclaredMethod|getConstructor|getDeclaredConstructor)\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\b[a-z_]\w*(?:\s*\.\s*[a-z_]\w*\s*\(\s*\))*\s*\.\s*(?:loadClass|defineClass)\s*\([^)\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\("
+        r"|\b[a-z_]\w*(?:\s*\.\s*[a-z_]\w*\s*\(\s*\))*\s*\.\s*(?:loadClass|defineClass)\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\b[a-z_]\w*(?:\s*\.\s*[a-z_]\w*\s*\(\s*\))*\s*\.\s*(?:loadClass|defineClass)\s*\(\s*(?!['\"\d])(?=[a-z_]\w*[a-z])(?:[a-z_]\w*)"
+        r")",
+        "A Java reflection entry point selecting a class or member from client-controlled input — CWE-470 unsafe reflection. Class.forName, ClassLoader-family loadClass/defineClass and getMethod/getDeclaredMethod/getConstructor/getDeclaredConstructor lookups on a receiver chain (obj.getClass().getDeclaredMethod(...) included) resolve the target from a request accessor, a '+' concatenation or a bare variable: an attacker who controls the class/member name can instantiate arbitrary classes, reach internal components or invoke methods that were never meant to be client-selectable, and a bytecode-fed defineClass can load injected classes — gadget-driven RCE or privilege escalation. Keep a fixed allowlist of class/member names (never request-derived), validate input against it before any reflection call, and avoid dynamic invocations of untrusted classes; prefer switch-based dispatch over reflective lookup",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

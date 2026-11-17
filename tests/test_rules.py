@@ -2658,6 +2658,66 @@ def test_javapath_literal_constant_or_classpath_targets_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R063-javapath"], issues
 
 
+def test_javareflect_request_derived_or_string_built_selection_flagged():
+    """R064-javareflect fires when a Java reflection entry point —
+    Class.forName, ClassLoader-family loadClass/defineClass or method /
+    constructor lookup — resolves its class or member selection from a
+    request accessor, a concatenated string or a lowercase variable
+    (CWE-470: attacker chooses which class/member is loaded or invoked)."""
+    src = (
+        'Object o = Class.forName(request.getParameter("class")).newInstance();\n'
+        'Class<?> c = Class.forName(req.getHeader("type"));\n'
+        'Object obj = Class.forName("com.example." + className).newInstance();\n'
+        'Class.forName(className);\n'
+        'Object x = Class.forName("plugins." + pluginName).getDeclaredConstructor().newInstance();\n'
+        'cl.loadClass(pluginClass);\n'
+        'classLoader.loadClass(request.getParameter("name"));\n'
+        'Class<?> c = loader.defineClass(request.getParameter("name"), bytes, 0, len);\n'
+        'ucl.loadClass("evil." + clz);\n'
+        'cl.loadClass("com." + request.getParameter("jndi"));\n'
+        'Method m = obj.getClass().getDeclaredMethod(request.getParameter("method"));\n'
+        'Method m = clazz.getMethod(req.getParameter("name"));\n'
+        'Constructor<?> c = cls.getConstructor(request.getHeader("sig"));\n'
+        'Method m = clazz.getMethod("execute" + actionName);\n'
+        'Object inst = clazz.getDeclaredConstructor(request.getParameter("argTypes")).newInstance();\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R064-javareflect"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javareflect_literal_constant_or_acquisition_expressions_stay_quiet():
+    """R064-javareflect stays quiet for literal class names,
+    SCREAMING_SNAKE constants, class-literal names, ClassLoader acquisition,
+    plain instance creation and fixed member-name lookups — the reflection
+    target is never client-controlled."""
+    src = (
+        'Class<?> c = Class.forName("java.lang.String");\n'
+        'Class<?> c = Class.forName(APP_CLASS);\n'
+        'Class<?> c = Class.forName(SomeClass.class.getName());\n'
+        'Class<?> c = Class.forName("com.example.MyClass");\n'
+        'runner.loadClass("com.example.plugins.ExtRunner");\n'
+        'cl.loadClass(DEFAULT_PLUGIN_CLASS);\n'
+        'Method m = obj.getClass().getDeclaredMethod("execute", String.class);\n'
+        'Method m = target.getClass().getMethod("run", int.class);\n'
+        'Constructor<?> ctor = Date.class.getConstructor(long.class);\n'
+        'Object m = mapper.getMethod("toString");\n'
+        'URLClassLoader ucl = new URLClassLoader(new URL[]{repo});\n'
+        'ClassLoader cl = Thread.currentThread().getContextClassLoader();\n'
+        'clazz.newInstance();\n'
+        'String name = request.getParameter("className");\n'
+        'Class.forName(Object.class.getName());\n'
+        'Object obj = factory.getConstructor(String.class).newInstance("x");\n'
+        'Method m = clazz.getDeclaredMethods()[0];\n'
+        'customMapper.getMethod("map", input);\n'
+        'ClassLoader cl = getClass().getClassLoader();\n'
+        'loader.getResourceAsStream("plugins/run.jar");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R064-javareflect"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2846,6 +2906,7 @@ def test_every_rule_has_test_exposure():
         "R061-ldapjndi",
         "R062-javaxxe",
         "R063-javapath",
+        "R064-javareflect",
     }
     assert exposed <= rids
     uncovered = rids - exposed
