@@ -1424,6 +1424,37 @@ _RULE_TUPLES = [
         r"(?!new\b|['\"\d]|this\s*\.\s*getClass\b)[a-z]\w*",
         "Java ObjectInputStream/XMLDecoder populated from a non-literal stream — CWE-502 unsafe deserialization. readObject() and XMLDecoder turn serialized bytes into live objects, so request input, an uploaded file or a socket stream fed to these sinks can be crafted into a gadget chain for pre-auth remote code execution (ysoserial). Never deserialize data you don't trust: reject serialized-object formats at the boundary, use a safe format (JSON/Protobuf), or at minimum ring-fence ObjectInputStream with a class allow-list and validate the stream's provenance",
     ),
+    (
+        "R055-spelinj",
+        "security",
+        "high",
+        "Expression-language (SpEL / MVEL / OGNL / EL) evaluation of a non-literal expression string",
+        # CWE-917 (Improper Neutralization of Special Elements used in an
+        # Expression Language Statement): SpEL, MVEL, OGNL and
+        # javax/jakarta Unified EL all compile and run the expression string
+        # inside the JVM — so an expression built from request input can call
+        # arbitrary static methods (Runtime.exec via T()/newInstance, OGNL's
+        # @java.lang.Runtime@getRuntime().exec), i.e. pre-auth RCE.  The sink
+        # must receive a *constructed* expression: either a bare identifier /
+        # method chain / concatenated '+'-variable first argument, or an
+        # ExpressionFactory.createValue/MethodExpression whose expression
+        # argument (the one right after the first comma — a scoped [^),] so
+        # the second comma before a return-type argument isn't mistaken) is a
+        # non-literal.  Static literal strings, null first args, plain MVEL /
+        # OGNL setValue writes, imports, declarations and custom-receiver
+        # names that merely echo the parser vocabulary (QueryParser,
+        # sqlParser, XmlParser) carry no fused sink and stay quiet.  Java
+        # sources are case-sensitive CamelCase, so no inline (?i) flag is used
+        # (same convention as R053/R054).  Single-line contract.
+        r"(?:\b(?:new\s+)?(?:SpelExpressionParser|TemplateAwareExpressionParser)\s*\(\s*\)\s*\.\s*parseExpression\s*\((?!['\"]|new\b)\s*[A-Za-z_]\w*[^)\n]*\)"
+        r"|\b(?:parser|expressionParser|spelParser|spelExpressionParser|elParser|templateParser)\b\s*\.\s*parseExpression\s*\((?!['\"]|new\b)\s*[A-Za-z_]\w*[^)\n]*\)"
+        r"|\b(?:MVEL|Ognl(?:Util)?)\s*\.\s*(?:eval|compileExpression|executeExpression|getValue|parseExpression)\s*\((?!['\"]|new\b|null\b|\d)\s*[A-Za-z_]\w*[^)\n]*\)"
+        r"|(?:\bnew\s+ELProcessor\b|\belProcessor\b)\s*(?:\(\s*\))?\s*\.\s*eval\s*\((?!['\"]|new\b|null\b|\d)\s*[A-Za-z_]\w*[^)\n]*\)"
+        r"|\bExpressionFactory\s*\.\s*newInstance\s*\(\s*\)\s*\.\s*create(?:Value|Method)Expression\s*\([^),]*,\s*(?!['\"]|new\b|null\b|\d)\s*[A-Za-z_]\w*[^)\n]*\)"
+        r"|\b(?:MVEL|Ognl(?:Util)?)\s*\.\s*(?:eval|getValue|compileExpression|executeExpression|parseExpression)\s*\([^)\n]*['\"]\s*\+\s*[A-Za-z_]\w*[^)\n]*\)"
+        r")",
+        "An expression-language statement built from non-literal input — CWE-917. SpEL.parseExpression / MVEL.eval / OGNL.getValue / ELProcessor.eval compile the string inside the JVM: request input can reach static-method invocation (SpEL T(java.lang.Runtime).getRuntime().exec(), OGNL @java.lang.Runtime@getRuntime().exec()) and execute code before any whitelist check runs. Evaluate expressions only from a server-side constant allow-list, precompile and cache known templates, and never concatenate request data into the expression string; sandbox the evaluation context (property access / method filtering) as defense-in-depth",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

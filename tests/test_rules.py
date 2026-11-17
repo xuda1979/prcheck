@@ -2064,6 +2064,64 @@ def test_javadeser_literal_classpath_or_plain_reference_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R054-javadeser"], issues
 
 
+def test_spelinj_non_literal_expression_flagged():
+    """R055-spelinj fires when a SpEL / MVEL / OGNL / EL sink evaluates a
+    non-literal expression — a request-derived variable, method chain,
+    concatenated-with-'+' string, or a config lookup (CWE-917: expression
+    languages compile the string in the JVM, so request input can reach
+    static-method invocation for RCE)."""
+    src = (
+        'Expression exp = new SpelExpressionParser().parseExpression(request.getParameter("expr"));\n'
+        "Expression exp = new TemplateAwareExpressionParser().parseExpression(header);\n"
+        "Expression exp = parser.parseExpression(userInput);\n"
+        "Expression exp = spelParser.parseExpression(body);\n"
+        "Object v = expressionParser.parseExpression(payload);\n"
+        "Expression e = parser.parseExpression(SPEL_TEMPLATE_PREFIX + userToken);\n"
+        'Object r = MVEL.eval(request.getParameter("formula"));\n'
+        "Serializable compiled = MVEL.compileExpression(ruleSource);\n"
+        "Object r = MVEL.executeExpression(compiled, ctx);\n"
+        'Object r = MVEL.eval("sum:" + total + ":" + input);\n'
+        "Object v = Ognl.getValue(ognlExpr, ctx, root);\n"
+        "Object v = OgnlUtil.getValue(config.get(\"expr\"), context, null);\n"
+        "Object v = Ognl.parseExpression(userFormula);\n"
+        'Object v = Ognl.getValue("id:" + rawId, ctx);\n'
+        "new ELProcessor().eval(expr);\n"
+        "elProcessor.eval(input);\n"
+        "Object r = ExpressionFactory.newInstance().createValueExpression(elContext, expr, String.class);\n"
+        "Object r = ExpressionFactory.newInstance().createMethodExpression(elCtx, userExpr, String.class, null);\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R055-spelinj"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_spelinj_literal_or_no_sink_stays_quiet():
+    """R055-spelinj stays quiet for literal expression strings, declarations,
+    imports, custom-receiver parser names, null args and MVEL / OGNL value
+    writes — no non-literal expression reaches an EL sink."""
+    src = (
+        'Expression exp = new SpelExpressionParser().parseExpression("ROLE_USER");\n'
+        'Expression exp = parser.parseExpression("user.id");\n'
+        'Expression exp = parser.parseExpression("Hello " + "world");\n'
+        "SpelExpressionParser parser = new SpelExpressionParser();\n"
+        "private final ExpressionParser parser = new SpelExpressionParser();\n"
+        "import org.springframework.expression.spel.standard.SpelExpressionParser;\n"
+        "Query query = QueryParser.parseExpression(sql);\n"
+        "XmlNode n = new XmlParser().parseExpression(doc);\n"
+        "ASTNode node = sqlParser.parseExpression(rawSql);\n"
+        'Object r = MVEL.eval("2 + 2");\n'
+        "Object r = MVEL.eval(null);\n"
+        'Ognl.setValue("root", ctx, value);\n'
+        'Object r = ExpressionFactory.newInstance().createValueExpression(elContext, "value", String.class);\n'
+        "elProcessor.eval(null);\n"
+        'String sql = "SELECT " + userCol + " FROM t";\n'
+        "exprHandler.eval(userInput);\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R055-spelinj"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2243,6 +2301,7 @@ def test_every_rule_has_test_exposure():
         "R052-hdritrust",
         "R053-javaexec",
         "R054-javadeser",
+        "R055-spelinj",
     }
     assert exposed <= rids
     uncovered = rids - exposed

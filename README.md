@@ -277,7 +277,16 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   `readObject()`/XMLDecoder rebuild live object graphs from the bytes, so
   request-sourced streams can carry ysoserial gadget chains for pre-auth RCE;
   all-literal chains, classpath/`this.getClass()` resource loads and
-  follow-up `readObject()` calls stay quiet — CWE-502).
+  follow-up `readObject()` calls stay quiet — CWE-502), expression-language
+  injection (`SpelExpressionParser.parseExpression(...)` / MVEL `eval` /
+  `compileExpression` / OGNL `getValue` / `ELProcessor.eval` /
+  `ExpressionFactory.create(Value|Method)Expression(...)` fed a non-literal
+  expression — a request-derived variable, method chain or
+  `+`-concatenated string: EL engines compile the string in the JVM, so
+  request input can reach static-method invocation for pre-auth RCE — CWE-917;
+  literal expression strings, `null` args, EL `setValue` writes,
+  declarations, imports and custom parser-receiver names like
+  `QueryParser`/`sqlParser` stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
