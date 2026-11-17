@@ -1200,6 +1200,34 @@ _RULE_TUPLES = [
         r")",
         "Functions built from string source on the client are code fed to the JS engine — the same primitive as eval (CWE-95): if any part of the source reaches user/request input, that's arbitrary script execution. Prefer borrowable callbacks or modules, and keep CSP strict rather than letting a string-body Function be the fallible seam",
     ),
+    (
+        "R047-postmsg-recv",
+        "security",
+        "medium",
+        "postMessage handler uses payload without validating event.origin",
+        # Receiver-side complement to R041 (which flags the send side:
+        # wildcard 'targetOrigin' / request-derived targetOrigin).  A
+        # window message listener (window/document/globalThis/self/parent or
+        # bare addEventListener('message', …), or a window-ish/bare onmessage
+        # assignment) that consumes the payload — e.data / event['data'] —
+        # without referencing event.origin / event.source / originalEvent on
+        # the same line trusts a cross-origin sender by default (CWE-346).
+        # A hard sender validation is often a compound/line-wrapped check, so
+        # an in-line origin/source reference on the same line is enough to
+        # silence the rule (no same-line reference = not auditable evidence,
+        # stay quiet rather than guess).  Bare-boundary guards keep
+        # `port.onmessage` / `worker.onmessage` / socket('message') handles
+        # quiet: those aren't window message listeners.
+        r"(?:"
+        r"(?:(?:window|document|globalThis|self|parent)\s*\.\s*)?"
+        r"addEventListener\s*\(\s*['\"]message['\"]\s*,"
+        r"|(?:window|globalThis|self|parent)\s*\.\s*onmessage\s*="
+        r"|(?<![A-Za-z0-9_.])onmessage\s*="
+        r")"
+        r"(?![^\n]*\.(?:origin|source|originalEvent)\b)"
+        r"[^\n]*?(?:\.data\b|\[\s*['\"]data['\"]\s*\])",
+        "A window message handler that consumes event.data without checking event.origin trusts any cross-origin page to script your handler (CWE-346): an attacker page postMessage()s a crafted payload straight into it. Validate event.origin against an explicit allow-list (or event.source, plus the MessageEvent.ports origin) before touching the payload, and never use '*'-style catch-alls",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

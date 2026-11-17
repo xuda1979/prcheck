@@ -233,7 +233,10 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   cookies), JS dynamic code execution from strings (`new Function`/`Function()`
   constructors including `window`/`globalThis`/`global` dotted forms, and
   `setTimeout`/`setInterval` with a string — not a callback — first
-  argument, the same primitive as `eval`, CWE-95).
+  argument, the same primitive as `eval`, CWE-95), unvalidated
+  cross-window message receivers (postMessage handlers consuming `event.data`
+  without referencing `event.origin`/`event.source` on the same line —
+  CWE-346, the receiver-side complement to the wildcard targetOrigin rule).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

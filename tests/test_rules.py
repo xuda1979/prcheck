@@ -1656,6 +1656,51 @@ def test_evaljs_callbacks_and_lowercase_functions_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R046-evaljs"], issues
 
 
+def test_postmsg_recv_payload_consumed_without_sender_check_flagged():
+    """R047-postmsg-recv fires when a window message handler consumes the
+    payload (e.data / event['data']) without referencing event.origin /
+    event.source / originalEvent on the same line (CWE-346)."""
+    src = (
+        "window.addEventListener('message', (e) => applySettings(e.data));\n"
+        "window.onmessage = (e) => update(e.data);\n"
+        "addEventListener('message', function(e) { render(e.data); });\n"
+        'window.addEventListener("message", (event) => frame.do(event["data"]));\n'
+        "document.addEventListener('message', evt => log(evt.data));\n"
+        "self.addEventListener('message', e => { store(e.data); });\n"
+        "onmessage = e => handle(e.data);\n"
+        "window.addEventListener('message', e => { token = e.data; });\n"
+        "parent.addEventListener('message', m => ingest(m.data));\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R047-postmsg-recv"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_postmsg_recv_sender_validated_or_non_listener_stays_quiet():
+    """R047-postmsg-recv stays quiet when the handler validates the sender
+    (event.origin / event.source on the line), doesn't consume a payload, or
+    isn't a window message listener at all (socket('message') events, Worker /
+    MessagePort onmessage handles, own-property reads)."""
+    src = (
+        "window.addEventListener('message', (e) => { if (e.origin !== 'https://app.example') return; use(e.data); });\n"
+        "window.addEventListener('message', handler);\n"
+        "window.onmessage = null;\n"
+        "socket.on('message', handle);\n"
+        "window.addEventListener('data', fn);\n"
+        "port.onmessage = (e) => { if (e.source === parent) send(e.data); };\n"
+        "port.onmessage = e => log(e.data);\n"
+        "worker.onmessage = (e) => apply(e.data);\n"
+        "navigator.serviceWorker.onmessage = e => respond(e.data);\n"
+        "window.addEventListener('message', e => this.frames.forEach(f => f.postMessage('hi', '*')));\n"
+        "e['data'];\n"
+        "const update = (data) => render(data);\n"
+        "window.addEventListener('message', (e) => { if (!allowed(e.origin)) return; });\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R047-postmsg-recv"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1827,6 +1872,7 @@ def test_every_rule_has_test_exposure():
         "R038-perm", "R039-nav", "R040-tabnab", "R041-postmsg",
         "R042-websock", "R043-math-random", "R044-storage", "R045-cookie",
         "R046-evaljs",
+        "R047-postmsg-recv",
     }
     assert exposed <= rids
     uncovered = rids - exposed
