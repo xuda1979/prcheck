@@ -844,6 +844,43 @@ _RULE_TUPLES = [
         r")",
         "A request-derived value is written into an HTTP response header via a header-setting sink — response.headers/resp[] subscript-assign or set_header/add_header/set_cookie in Python, res.setHeader/header/append/set/cookie/writeHead or xhr.setRequestHeader in Node — an attacker can inject CRLF to smuggle headers or split responses (HTTP response header injection/CWE-113)",
     ),
+    (
+        "R036-loginj",
+        "security",
+        "high",
+        "Log injection / log forging: a request-derived value is written to a logging or console sink",
+        # Fires on a single added line when (CWE-117): a request-derived value is
+        # written unfiltered into a logging/console sink — Python logger/log/logging
+        # module .debug/.info/.warning/.warn/.error/.exception/.critical calls
+        # (optionally on a receiver like app.logger/self.logger or on a
+        # logging.getLogger(name).method(…) chain), Python print(...), Node/JS
+        # console.log/warn/error/info/debug/trace, or Java System.out/err
+        # .println/.print/.printf. The request source must appear INSIDE the
+        # sink's argument list (scan stops at the first `)`) so accessors that
+        # merely follow later on the line (a ternary condition, a separate call)
+        # stay quiet; a request accessor is required so static log literals, log
+        # of a bare variable, logging.basicConfig/setLevel config, .getLogger()
+        # factory calls, other receivers (parser.error, pprint.pprint) and
+        # non-sink assignments stay quiet. D003 handles sensitive-KEYWORD
+        # content; this rule handles request-DERIVED content.
+        r"(?i)(?:"
+        # Python dotted loggers — optional receiver prefix (app.logger,
+        # self.logger), or the logging.getLogger(name).method(…) chain.
+        r"(?:(?:\b[A-Za-z_]\w*\s*\.\s*)?\b(?:logger|log|logging)\s*\.\s*"
+        r"(?:debug|info|warning|warn|error|exception|critical)\s*\("
+        r"|\blogging\s*\.\s*getLogger\s*\([^)\n]*\)\s*\.\s*"
+        r"(?:debug|info|warning|warn|error|exception|critical)\s*\("
+        # Python print, Node/JS console.*, Java System.out/err.
+        r"|\bprint\s*\("
+        r"|\bconsole\s*\.\s*(?:log|warn|error|info|debug|trace)\s*\("
+        r"|\bSystem\s*\.\s*(?:out|err)\s*\.\s*(?:println|print|printf)\s*\("
+        r")"
+        # request-derived source inside the sink's argument list — scan only up
+        # to the first closing paren so accessors later on the line stay quiet.
+        r"(?=[^)\n]*\b(?:req|request|ctx|event)\b\s*(?:\?\.|\.|\[))"
+        r")",
+        "A request-derived value is written unfiltered to a logging or console sink — Python logger/log/logging .debug/.info/.warning/.error/.exception/.critical or print(), Node/JS console.log/warn/error/info, Java System.out/err.println — an attacker can inject CRLF/control chars to forge fake log lines or poison log-based monitoring (log injection / log forging/CWE-117)",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

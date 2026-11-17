@@ -202,7 +202,11 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   injection (request-derived values written via Python
   `response.headers[]`/`resp[]` subscript-assign or
   `set_header`/`add_header`/`set_cookie`, or Node `res.setHeader`/`header`/
-  `append`/`set`/`cookie`/`writeHead` and XHR `setRequestHeader`).
+  `append`/`set`/`cookie`/`writeHead` and XHR `setRequestHeader`), log
+  injection / log forging (request-derived values written to Python
+  `logger`/`log`/`logging` `.debug`/`.info`/`.warning`/`.error`/`.exception`/
+  `.critical` or `print()`, Node/JS `console.log`/`warn`/`error`/`info`, Java
+  `System.out`/`err` `.println`/`.print`/`.printf`).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

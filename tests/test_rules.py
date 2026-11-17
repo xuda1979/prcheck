@@ -1034,6 +1034,61 @@ def test_response_header_injection_literal_and_generic_quiet():
     assert not [i for i in issues if i.rule_id == "R035-hdrinj"], issues
 
 
+def test_log_injection_request_values_flagged():
+    """R036-loginj flags request-derived values written to logging/console sinks
+    across Python logger/log/logging (.debug/.info/.warning/.error/.exception/
+    .critical), logging.getLogger(name).method chains, print(), Node console.*,
+    and Java System.out/err.println/printf (CWE-117)."""
+    src = (
+        "logger.error(\"login failed for \" + request.headers.get('user'))\n"
+        "log.info(f\"user {ctx.request.remote_addr} arrived\")\n"
+        "logging.warning(\"invalid input: %s\" % req.query.v)\n"
+        "logging.exception(\"failed to parse \" + request.body.payload)\n"
+        "console.log(\"req: \" + request.body.data)\n"
+        "console.error(\"[auth]\", request.query.token)\n"
+        "print(request.args.get('debug'))\n"
+        "System.out.println(\"user: \" + request.getParameter(\"u\"))\n"
+        "System.err.println(\"failed \" + ctx.request.method)\n"
+        "self.logger.error(\"bad txn \" + request.json['amount'])\n"
+        "logging.getLogger(__name__).error(\"boom \" + request.query.v)\n"
+        "app.logger.warning(\"rate \" + req.query.rate)\n"
+        "log.debug(request.headers.get(\"trace\"))\n"
+        "logger.critical(\"db from \" + request.host)\n"
+        "console.log(req?.query?.tag)\n"
+        "print(f\"cache-bust {request.args.get('v')}\")\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R036-loginj"]
+    assert [i.line for i in hits] == list(range(1, 17)), f"R036-loginj mismatch: {hits}"
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_log_injection_static_and_non_sink_quiet():
+    """R036-loginj must not fire on static log literals, config/factory calls,
+    log of a bare variable, other receivers, accessors outside the sink's argument
+    list (ternary condition / later call), or non-sink assignments."""
+    src = (
+        "logger.info(\"service started\")\n"
+        "logging.basicConfig(level=logging.DEBUG)\n"
+        "logger = logging.getLogger(__name__)\n"
+        "logger.setLevel(logging.DEBUG)\n"
+        "console.log(\"connected\")\n"
+        "System.out.println(\"ready\")\n"
+        "print(\"wrote %d items\" % items_written)\n"
+        "log.info(user.name)\n"
+        "backend.info(request.query.backend)\n"
+        "report = audit.replace(req.query.tag, request.body.id)\n"
+        "log.info('ok') if request.query.ok else log.error('bad')\n"
+        "parser.error('usage: %s' % request.query.v)\n"
+        "pprint.pprint(request.query.v)\n"
+        "logging.shutdown()\n"
+        "console.error = request.query.v\n"
+        "res.writeHead(200, {'X': request.query.v})\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R036-loginj"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1201,7 +1256,7 @@ def test_every_rule_has_test_exposure():
         "R022-ssti", "R023-xxe", "R024-jwt", "R025-pw", "R026-upload",
         "R027-massassig", "R028-nosql", "R029-ldap", "R030-xpath",
         "R031-ssrf-js", "R032-cmd-node", "R033-protopoll",
-        "R034-redos", "R035-hdrinj",
+        "R034-redos", "R035-hdrinj", "R036-loginj",
     }
     assert exposed <= rids
     uncovered = rids - exposed
