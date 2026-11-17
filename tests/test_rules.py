@@ -1796,6 +1796,53 @@ def test_fixatn_generic_key_server_value_or_readops_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R049-fixatn"], issues
 
 
+def test_dynimp_request_derived_module_flagged():
+    """R050-dynimp fires when a dynamic import primitive (Python __import__/
+    importlib.import_module, Node require()/import()) is given a
+    request-derived module/package name (CWE-470)."""
+    src = (
+        "__import__(request.args.get('mod'))\n"
+        "importlib.import_module(request.form.get('module'))\n"
+        "mod = import_module(request.values.get('pkg'))\n"
+        "importlib.import_module('views.' + request.GET.get('view'))\n"
+        "const mod = require(req.params.controller);\n"
+        "require(request.query.module);\n"
+        "await import(req.query.screen);\n"
+        "require(`./services/${req.baseUrl}/handler`)\n"
+        "const lib = require(request.headers.get('x-module'));\n"
+        "require(req.body.pkg + '.js')\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R050-dynimp"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_dynimp_static_or_request_outside_call_stays_quiet():
+    """R050-dynimp stays quiet for static literals (require('express')),
+    plain/config variables, request data consumed after a static load
+    (require('fs').readFileSync(req...)), non-call uses, and guarded
+    receivers (app.require / myRequire / require.resolve)."""
+    src = (
+        "require('express')\n"
+        "__import__('os')\n"
+        "importlib.import_module('config.defaults')\n"
+        "const mod = require(moduleName);\n"
+        "await import(COMPONENT_BASE);\n"
+        "import_module(CONFIG.module)\n"
+        "require('fs').readFileSync(request.args.get('path'))\n"
+        "importlib.import_module('os').system(request.args.get('x'))\n"
+        "app.require('path')\n"
+        "myRequire('x')\n"
+        "require.cache['m']\n"
+        "require(request)\n"
+        "import_module()\n"
+        "handler(require('fs'), vars)\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R050-dynimp"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -1970,6 +2017,7 @@ def test_every_rule_has_test_exposure():
         "R047-postmsg-recv",
         "R048-cookieset",
         "R049-fixatn",
+        "R050-dynimp",
     }
     assert exposed <= rids
     uncovered = rids - exposed

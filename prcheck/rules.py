@@ -1286,6 +1286,29 @@ _RULE_TUPLES = [
         r"\b",
         "A session id being adopted from request input — the fix to prevent session fixation (CWE-384). On login, always rotate to a NEW server-generated session id: session.regenerate()/migrate() (Django/Flask) or req.session.regenerate (Node), never re-assign the id from request args/form/json/headers/cookies. Regenerating after privilege change breaks any attacker-fixated id",
     ),
+    (
+        "R050-dynimp",
+        "security",
+        "high",
+        "Dynamic import/require of a request-derived module path",
+        # CWE-470: a module/package name loaded at runtime via a dynamic import
+        # primitive (Python __import__ / importlib.import_module / import_module,
+        # Node require(...) / import(...)) whose argument is request-derived.
+        # For Node, loadable.module is a code-loading primitive — a request-fed
+        # require() executes whatever package the caller names (arbitrary code),
+        # and import_module/__import__ at least selects attacker-chosen code
+        # paths.  The paren-scoped lookahead requires the request source
+        # *inside the sink's own parens* (a [^)\n]* lookahead) so
+        # require('fs').readFileSync(req.args...) and
+        # import_module('os').system(req.args...) stay quiet; static literals
+        # and plain variables are fine (require('express'), import_module(CONFIG)).
+
+        r"(?i)"
+        r"(?:(?<![A-Za-z0-9_.])(?:__import__|importlib\s*\.\s*import_module|import_module)\s*\("
+        r"|(?<![A-Za-z0-9_.])(?:require|import)\s*\()"
+        r"(?=[^)\n]*(?:request|req)\.(?:args|values|form|json|get_json|cookies|headers|files|query|query_params|params|body|query_string|url|baseUrl|originalUrl|path|data|GET|POST)\b)",
+        "A module/package name loaded at runtime from request input — CWE-470 (Use of Externally-Controlled Input to Select Classes or Code). A request-fed require()/import() runs arbitrary attacker-named code (Node), and __import__/import_module picks attacker-chosen code paths. Load modules from a server-side allow-list (one constant import map keyed by a strict identifier), and never build the module specifier from request data, URL segments or headers",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

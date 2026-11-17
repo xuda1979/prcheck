@@ -246,7 +246,11 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   property adopted from `request.*`/`req.*` input — CWE-384, adopting a
   client-supplied id pre-picks the victim's session and fixates it after
   login; server-generated ids and generic keys like `session['theme']` stay
-  quiet).
+  quiet), dynamic imports of a request-derived module path (Python
+  `__import__`/`importlib.import_module` or Node `require()`/dynamic
+  `import()` fed by `request.*`/`req.*` — CWE-470, letting the caller pick
+  which module/package loads, arbitrary code in Node; static literals like
+  `require('express')` and config variables stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
