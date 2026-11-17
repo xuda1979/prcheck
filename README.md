@@ -250,7 +250,13 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   `__import__`/`importlib.import_module` or Node `require()`/dynamic
   `import()` fed by `request.*`/`req.*` — CWE-470, letting the caller pick
   which module/package loads, arbitrary code in Node; static literals like
-  `require('express')` and config variables stay quiet).
+  `require('express')` and config variables stay quiet), redirects and
+  absolute URLs built from the client-supplied Host header (request.host / 
+  request.host_url or request|req.headers['Host'] / .Host / headers.get('Host')
+  fed to a redirect(...) call, an http/https literal build, or a
+  URL/reset/callback-link assignment — CWE-644 Host Header Attack: open
+  redirect, poisoned emailed-reset links, and Vary-less cache poisoning;
+  allowed-host guards, comparisons, log lines and plain reads stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

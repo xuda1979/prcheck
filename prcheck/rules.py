@@ -1309,6 +1309,33 @@ _RULE_TUPLES = [
         r"(?=[^)\n]*(?:request|req)\.(?:args|values|form|json|get_json|cookies|headers|files|query|query_params|params|body|query_string|url|baseUrl|originalUrl|path|data|GET|POST)\b)",
         "A module/package name loaded at runtime from request input — CWE-470 (Use of Externally-Controlled Input to Select Classes or Code). A request-fed require()/import() runs arbitrary attacker-named code (Node), and __import__/import_module picks attacker-chosen code paths. Load modules from a server-side allow-list (one constant import map keyed by a strict identifier), and never build the module specifier from request data, URL segments or headers",
     ),
+    (
+        "R051-hostpois",
+        "security",
+        "high",
+        "Redirect target or URL built from the client-supplied Host header",
+        # CWE-644 (OWASP Host Header Attack): request.host / request.host_url
+        # and request|req.headers['Host'] / .Host / headers.get('Host') reflect
+        # an attacker-controlled header, never the trusted server name.  Building
+        # a redirect target, absolute URL or password-reset/callback link from it
+        # lets the caller poison the link: open redirect to their domain,
+        # emailed-reset caching to their host, or Vary-less Host cache
+        # poisoning.  Requires BOTH a host source and a construction signal on
+        # the same line — a redirect(...) call, an http/https literal, or an
+        # assignment (not a comparison) to a url/redirect/link-ish name — so
+        # allowed-host guards (if request.host not in ALLOWED_HOSTS),
+        # comparisons, log lines and plain reads carry no in-line sink and stay
+        # quiet (single-line evidence contract, same as R047/R048).
+        r"(?i)"
+        r"(?=[^\n]*(?:(?:request|req)\.host(?:_url)?\b"
+        r"|(?:request|req)\.headers\.[Hh]ost\b"
+        r"|(?:request|req)\.headers(?:\.get\s*)?\(\s*['\"][Hh]ost['\"]\s*\)"
+        r"|(?:request|req)\.headers\s*\[\s*['\"][Hh]ost['\"]\s*\]))"
+        r"(?=[^\n]*(?:\bredirect\s*\("
+        r"|\bhttps?://"
+        r"|\b(?:url|uri|href|link|redirect|callback|return_url|reset|verify|confirm|invite)\w*\s*=\s*(?!=)(?![^\n]*(?:==|!=))))",
+        "A redirect or absolute URL built from the client-supplied Host header — CWE-644 (Improper Neutralization of a Host Header). Before using request.host/host_url for a redirect target, password-reset link or callback URL, validate it against an explicit allow-list of server hostnames (Django ALLOWED_HOSTS, a constant origin map), then build the URL from the validated value or a config constant — never from the raw header, and always add Vary: Host for caching",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

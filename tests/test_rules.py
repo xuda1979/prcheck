@@ -1843,6 +1843,60 @@ def test_dynimp_static_or_request_outside_call_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R050-dynimp"], issues
 
 
+def test_hostpois_redirect_or_url_from_host_header_flagged():
+    """R051-hostpois fires when a redirect target, absolute URL or
+    reset/callback link is built from the client-supplied Host header —
+    request.host / request.host_url or request|req.headers['Host'] / .Host /
+    headers.get('Host') (CWE-644)."""
+    src = (
+        "return redirect(request.host_url)\n"
+        "redirect(f\"https://{request.host}/login\")\n"
+        "return redirect('https://' + request.host + '/auth')\n"
+        "redirect(request.headers.get('Host'))\n"
+        "redirect('http://' + req.headers.host)\n"
+        "reset_url = f\"https://{request.headers.get('Host')}/reset?token={token}\"\n"
+        "callback = 'https://' + req.headers.host + '/cb'\n"
+        "verify_link = f'https://{request.host}/confirm/{uid}'\n"
+        "url = request.host_url + '/verify'\n"
+        "invite_url = request.headers['Host'] + '/invite?t=' + token\n"
+        "return_url = 'https://' + request.host + '/done'\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R051-hostpois"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_hostpois_guards_reads_or_static_targets_stay_quiet():
+    """R051-hostpois stays quiet for allowed-host guards, comparisons, log
+    lines, plain reads of the host, static http(s) literals, non-Host
+    headers, and redirects fed config constants or other request fields —
+    no host source or no in-line construction signal."""
+    src = (
+        "if request.host not in ALLOWED_HOSTS: raise SuspiciousOperation\n"
+        "if request.host != settings.HOST: abort(400)\n"
+        "logger.warning('bad host %s', request.headers.get('Host'))\n"
+        "expected = request.host == CONFIG.expected_host\n"
+        "base_host = request.host_url  # used downstream\n"
+        "ALLOWED_HOSTS = ['example.com', 'api.internal']\n"
+        "return redirect(url_for('login', next=request.form.get('next')))\n"
+        "return redirect(settings.LOGIN_URL)\n"
+        "app.config['SERVER_NAME'] = 'example.com'\n"
+        "verify_host = request.host == expected\n"
+        "url = 'https://example.com/api'\n"
+        "link = f\"https://{CONFIG.BASE_URL}/reset?t={token}\"\n"
+        "redirect('https://accounts.oursite.com/login')\n"
+        "host = request.headers.get('Host', 'default')  # for logging\n"
+        "download_url = 'https://static.example.com/' + file\n"
+        "if url == request.host: pass\n"
+        "xh = request.headers.get('x-forwarded-host')\n"
+        "remote = request.headers['X-Forwarded-For']\n"
+        "csrf_origin = request.headers.get('Host')\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R051-hostpois"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2018,6 +2072,7 @@ def test_every_rule_has_test_exposure():
         "R048-cookieset",
         "R049-fixatn",
         "R050-dynimp",
+        "R051-hostpois",
     }
     assert exposed <= rids
     uncovered = rids - exposed
