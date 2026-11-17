@@ -1930,6 +1930,46 @@ _RULE_TUPLES = [
         r"[^'\"]*['\"]",
         "A Java JCA getInstance call picks a broken or legacy algorithm from a literal — CWE-327. MD5 and SHA-1 (also as HmacMD5/HmacSHA1, MD5withRSA/SHA1withRSA, PBKDF2WithHmacSHA1, SHA1PRNG) are cryptographically broken, DES/DESede/3DES and RC4/ARC4/ARCFOUR are legacy ciphers with known weaknesses, and ECB mode leaks plaintext block structure: an attacker observing ciphertext can strip/reorder blocks or exploit collision or keystream biases to forge MACs or signatures. Require an actual security review of any MD5/SHA-1/RC4/DES/3DES/ECB usage; for hashing reference integrity primitives like SHA-256 or HMAC-SHA-256, AEAD schemes like AES/GCM for encryption, PBKDF2WithHmacSHA256 / Argon2 for key derivation, and SHA256withRSA / Ed25519 for signatures — and keep algorithm names in server-side configuration, never in unattended code",
     ),
+    (
+        "R067-javaxss",
+        "security",
+        "high",
+        "Java reflected/stored XSS: response body writer (response.getWriter().print/println/write/append/format/printf, bare response-writer receiver out/pw/writer/printWriter/responseWriter/outWriter .print/println/write, JSP <%= request* %> expression) fed client-controlled input (CWE-79)",
+        # CWE-79 (Improper Neutralization of Input During Web Page Generation):
+        # Java reflected/stored XSS.  Sinks write request-derived, concatenated
+        # or bare-variable input into the HTTP response BODY:
+        #   response.getWriter().print/println/write/append/format/printf(...)
+        #   bare response-writer receivers — out/pw/writer/printWriter/
+        #     responseWriter/outWriter .print/println/write(...)  with a
+        #     (?<!System\.) guard so System.out/System.err console printing
+        #     stays quiet (R036-loginj owns console log injection, and
+        #     console output never reaches the HTTP client).
+        #   JSP expressions <%= request|req.(getParameter|getHeader|
+        #     getQueryString|getRequestURI|getAttribute)(...) %>.
+        # Non-literal sources (single-line contract): a request accessor
+        # (getParameter/getHeader/getQueryString/getRequestURI), a
+        # 'literal' + lowercaseIdentifier concatenation, or a bare lowercase
+        # variable (the (?=[a-z_]\w*[a-z]) guard keeps literals/constants out).
+        # Literal output ("Hello"), constants (PAGE_CACHE, COLUMN), numeric
+        # operands, non-writer receivers (helper.print), header writes
+        # (setContentType/setHeader/setStatus/sendError/sendRedirect) and
+        # getWriter() acquisition with no write call stay quiet.  printf/
+        # format sink branches match the request-accessor or variable-arg
+        # forms but not 'literal' + var (the format string is the sink).
+        # Java sources are case-sensitive CamelCase, so no inline flag
+        # (R053-R066 convention).  Single-line contract.
+        r"(?:"
+        r"\bresponse\s*\.\s*getWriter\s*\(\s*\)\s*\.\s*(?:print|println|write|append)\s*\(\s*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\("
+        r"|\bresponse\s*\.\s*getWriter\s*\(\s*\)\s*\.\s*(?:format|printf)\s*\([^)\n]*\b(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\("
+        r"|\bresponse\s*\.\s*getWriter\s*\(\s*\)\s*\.\s*(?:print|println|write)\s*\([^\n]*?['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\bresponse\s*\.\s*getWriter\s*\(\s*\)\s*\.\s*(?:print|println|write)\s*\(\s*(?!['\"\d])(?=[a-z_]\w*[a-z])(?:[a-z_]\w*)\s*\)"
+        r"|(?<!System\.)\b(?:out|pw|writer|printWriter|responseWriter|outWriter)\s*\.\s*(?:print|println|write)\s*\(\s*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\("
+        r"|(?<!System\.)\b(?:out|pw|writer|printWriter|responseWriter|outWriter)\s*\.\s*(?:print|println|write)\s*\([^\n]*?['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|(?<!System\.)\b(?:out|pw|writer|printWriter|responseWriter|outWriter)\s*\.\s*(?:print|println|write)\s*\(\s*(?!['\"\d])(?=[a-z_]\w*[a-z])(?:[a-z_]\w*)\s*\)"
+        r"|<%=\s*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getAttribute)\s*\([^%]*?%>"
+        r")",
+        "A Java response body writer emits client-controlled bytes back to the HTTP client — CWE-79 cross-site scripting. response.getWriter().print/println/write/append/format/printf, bare response-writer receivers (out/pw/writer/printWriter/responseWriter/outWriter .print/println/write) or a JSP <%= request.* %> expression is fed a request accessor (getParameter/getHeader/getQueryString/getRequestURI), a 'prefix' + variable concatenation or a bare variable: the browser treats the echoed input as live markup/script, so a crafted parameter or header runs arbitrary JavaScript in the victim's origin (reflected or, when stored first, stored XSS) and can steal cookies/CSRF tokens or drive actions as the user. HTML-encode all dynamic output (context-aware encoding for the element/attribute/script/URL context, e.g. OWASP Java Encoder), or better render with a template engine that auto-escapes and never write request input into the body unencoded; keep data on the server side and use Content-Security-Policy to blunt the blast radius",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

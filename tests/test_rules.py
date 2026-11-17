@@ -2843,6 +2843,72 @@ def test_javacrypto_safe_algorithm_or_nonliteral_getinstance_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R066-javacrypto"], issues
 
 
+def test_javaxss_response_writer_request_input_flagged():
+    """R067-javaxss fires when a Java HTTP response body writer feeds
+    client-controlled input back to the browser — request accessor,
+    'literal' + variable concatenation or bare variable, plus JSP <%= %>
+    expressions (CWE-79)."""
+    src = (
+        'response.getWriter().println(request.getParameter("q"));\n'
+        'response.getWriter().write(request.getParameter("name"));\n'
+        'response.getWriter().append(req.getHeader("X-Data"));\n'
+        'response.getWriter().printf("id=%s", request.getParameter("id"));\n'
+        'out.println(request.getParameter("user"));\n'
+        'pw.print(req.getParameter("id"));\n'
+        'writer.println(request.getHeader("traceId"));\n'
+        'out.print("<h1>" + title + "</h1>");\n'
+        'pw.write("<option value=" + optionId + ">");\n'
+        'response.getWriter().print("Welcome, " + displayName);\n'
+        'response.getWriter().println(userName);\n'
+        'out.print(comment);\n'
+        'pw.println(address);\n'
+        'printWriter.println(request.getQueryString());\n'
+        '<%= request.getParameter("page") %>\n'
+        '<%= request.getParameter("user") %>\n'
+        '<%= req.getHeader("X-Custom") %>\n'
+        'outWriter.write(request.getRequestURI());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R067-javaxss"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaxss_literal_or_console_or_nonwriter_stays_quiet():
+    """R067-javaxss stays quiet for literal output, constants, numeric
+    operands, System.out/System.err console printing (R036-loginj owns log
+    injection), non-writer receivers and non-body-write calls — no XSS
+    sink on the HTTP response body."""
+    src = (
+        'System.out.println(request.getParameter("u"));\n'
+        'System.out.println("user=" + user);\n'
+        'System.err.println("warn: " + request.getParameter("x"));\n'
+        'logger.error("bad input: " + input);\n'
+        'log.info("user " + username + " logged in");\n'
+        'out.println();\n'
+        'out.print(100);\n'
+        'pw.close();\n'
+        'out.flush();\n'
+        'response.setContentType("text/html");\n'
+        '<%= pageContext.getAttribute("name") %>\n'
+        '<%= fullName %>\n'
+        '<% if (session.isNew()) { %>\n'
+        'response.getWriter();\n'
+        'out.println("Hello, world!");\n'
+        'pw.print(PAGE_CACHE);\n'
+        'writer.println("<td>" + COLUMN + "</td>");\n'
+        'helper.print(request.getParameter("u"));\n'
+        'response.sendRedirect("/home");\n'
+        'String out = "x";\n'
+        'out.trim();\n'
+        'console.log(request.getParameter("u"));\n'
+        'writer.print("");\n'
+        '<%= pageContext.findAttribute("user") %>\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R067-javaxss"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -3034,6 +3100,7 @@ def test_every_rule_has_test_exposure():
         "R064-javareflect",
         "R065-java4xx",
         "R066-javacrypto",
+        "R067-javaxss",
     }
     assert exposed <= rids
     uncovered = rids - exposed

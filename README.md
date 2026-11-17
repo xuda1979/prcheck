@@ -437,7 +437,21 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   modern algorithms (SHA-256/384/512, SHA3-*, AES/GCM, AES/CBC, AES/OFB,
   PBKDF2WithHmacSHA256, PBEWithHmacSHA256AndAES_256, HmacSHA256,
   SHA256withRSA, SHA384withRSA), non-literal `getInstance(variable)` and
-  `getInstanceStrong()` stay quiet).
+  `getInstanceStrong()` stay quiet), and Java reflected/stored XSS
+  (`response.getWriter().print/println/write/append/format/printf(...)`,
+  bare response-writer receivers `out`/`pw`/`writer`/`printWriter`/
+  `responseWriter`/`outWriter` `.print/println/write(...)` (with a
+  `System.out`/`System.err` exclusion — console printing never reaches the
+  HTTP client and R036 owns console log injection), and JSP `<%= request.* %>`
+  expressions fed a `request.*` accessor (`getParameter`/`getHeader`/
+  `getQueryString`/`getRequestURI`), a `'...' + lowercaseIdentifier`
+  concatenation or a bare lowercase variable — the browser treats the echoed
+  input as live markup/script, so a crafted parameter/header runs arbitrary
+  JavaScript in the victim's origin — CWE-79; literal output
+  (`out.println("Hello")`), constants (`PAGE_CACHE`, `COLUMN`), numeric
+  operands, non-writer receivers (`helper.print(...)`), header writes
+  (`setContentType`/`setHeader`/`sendRedirect`) and `getWriter()`
+  acquisition without a write call stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
