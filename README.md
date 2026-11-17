@@ -313,7 +313,22 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   services, `file://` reads) — CWE-918; literal `https://...` strings,
   ALL_CAPS URL constants, bare `HttpRequest` objects, `config.get(...)`
   accessor arguments, imports, `getResource()`/classloader lookups and
-  literal-path WebClient calls stay quiet).
+  literal-path WebClient calls stay quiet), JDBC / Spring `JdbcTemplate`
+  SQL injection
+  (`Statement.executeQuery` / `executeUpdate` / `execute`,
+  `Connection.prepareStatement` and `JdbcTemplate.query` /
+  `queryForObject` / `queryForList` / `update` / `execute` / `batchUpdate`
+  fed a `'...' + lowerIdentifier` literal-concatenated string, a bare
+  `request.*` accessor, or a builder/`.toString()` chain
+  (`queryBuilder.toString()`, `sb.append(...).append(...).toString()`),
+  incl. `conn.createStatement().execute*` chains — concatenated SQL text
+  crosses to the JDBC driver so request input can smuggle OR/UNION
+  fragments, comment-out or stack statements — CWE-89; parameterized
+  `?`/`:name` queries, fully-literal SQL, UPPER_CASE SQL constants and
+  ALL_CAPS concat operands, no-arg `execute()` / bare `Statement`
+  objects, `setString` binding, in-string arithmetic, non-query string
+  building, `JdbcTemplate.execute(connection -> ...)` lambda receivers
+  and custom receiver names stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

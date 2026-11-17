@@ -1551,6 +1551,57 @@ _RULE_TUPLES = [
         r")",
         "A Java outbound HTTP/URL sink fed a non-literal, request-derived or concatenated URL — CWE-918 server-side request forgery. URL.openConnection/openStream, HttpClient.newHttpClient().send, RestTemplate/WebClient/OkHttpClient calls and Apache HttpClient get/post must resolve the target before any network hop: a URL built from request.getParameter/URI.create(request...) or by string concatenation can be pointed at cloud metadata (169.254.169.254), internal services or file:// URIs, letting a caller read secrets or drive the server as a proxy. Resolve URLs only from a fixed server-side allow-list (scheme + host), reject non-http(s) schemes, and pass pre-validated absolute constants to the client instead of raw request-derived strings",
     ),
+    (
+        "R058-jdbcsqli",
+        "security",
+        "high",
+        "JDBC / JdbcTemplate SQL query built by string concatenation or fed request-derived input",
+        # CWE-89 (Improper Neutralization of Special Elements used in an SQL
+        # Command): Statement.executeQuery/executeUpdate/execute,
+        # Connection.prepareStatement and Spring JdbcTemplate.query/update/
+        # execute compile the string as SQL inside the JDBC driver, so a
+        # query assembled with '+' concatenation of a lowercase identifier
+        # (request parameter, DTO field, config lookup, builder variable) or
+        # passed a method-chain argument (queryBuilder.toString(), sb.append
+        # (...).toString(), request.getParameter/getHeader) yields an
+        # injection point: raw fragments cross into the DB and an attacker
+        # can smuggle OR/UNION, comment-out closing quotes, or stack
+        # statements.  prepareStatement with a fully-literal or fully-
+        # parameterized (? binds) string is immune and stays quiet, as do
+        # literal-only execute* / template calls, bare Statement objects
+        # without an execute*, execute() with no argument, UPPER_CASE SQL
+        # constants, ALL_UPPER concat operands, prepared-statement binding
+        # calls (ps.setString), non-query string building outside a sink,
+        # JdbcTemplate.execute(connection -> ...) lambda receivers, and
+        # custom receivers named ex/executor/rowMapper.  The '+'-concat
+        # discriminator requires a literal quote immediately before the '+'
+        # (or the whole pre-'+' argument quoted) so in-string arithmetic
+        # ("a+b" inside SQL) and ALL_CAPS concat operands stay quiet; the
+        # bare-identifier chain branch needs an actual accessor call token
+        # so a generic String argument (jdbcTemplate.query(sql, ...)) stays
+        # quiet.  Java sources are case-sensitive CamelCase, so no inline
+        # flag (same convention as R053-R057).  Single-line contract.
+        r"(?:\b(?:stmt|statement|st|ps|pstmt|preparedStatement)\s*\.\s*(?:executeQuery|executeUpdate|executeLargeUpdate|execute)"
+        r"\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|\b(?:stmt|statement|st|ps|pstmt|preparedStatement)\s*\.\s*(?:executeQuery|executeUpdate|executeLargeUpdate|execute)"
+        r"\s*\(\s*(?!['\"\d)])\s*[a-z_]\w*"
+        r"(?:\s*\.\s*(?:toString|append|build|concat|format|valueOf|readLine|read|join|replace|edit|getParameter|getHeader|getQueryString|getRequestURI|getRequestURL|getProperty|getenv|getUsername|getEmail|getTable|getSql|getCode|getBody)\s*\([^;\n]*\)\s*)+"
+        r"|\b(?:conn|connection|con|db|dataSource|source|pool)\s*\.\s*prepareStatement\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|\b(?:conn|connection|con|db|dataSource|source|pool)\s*\.\s*prepareStatement\s*\(\s*(?!['\"\d)])\s*[a-z_]\w*"
+        r"(?:\s*\.\s*(?:toString|append|build|concat|format|valueOf|edit|getParameter|getHeader|getQueryString|getRequestURI|getRequestURL|getProperty|getenv|getUsername|getEmail|getTable|getSql|getCode)\s*\([^;\n]*\)\s*)+"
+        r"|\b(?:conn|connection|con|db|dataSource|source|pool)\s*\.\s*createStatement\s*\(\s*\)\s*\.\s*(?:executeQuery|executeUpdate|execute)"
+        r"\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\b(?:conn|connection|con|db|dataSource|source|pool)\s*\.\s*createStatement\s*\(\s*\)\s*\.\s*(?:executeQuery|executeUpdate|execute)"
+        r"\s*\(\s*(?!['\"\d)])\s*[a-z_]\w*"
+        r"(?:\s*\.\s*(?:toString|append|build|concat|format|valueOf|readLine|read|join|replace|getParameter|getHeader|getQueryString|getRequestURI|getProperty|getenv|getUsername|getEmail|getTable|getSql|getCode)\s*\([^;\n]*\)\s*)+"
+        r"|\b(?:jdbcTemplate|namedParameterJdbcTemplate|simpleJdbcTemplate|jdbc|jt)\s*\.\s*(?:query|queryForObject|queryForList|queryForMap|queryForRowSet|update|execute|batchUpdate)"
+        r"\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|\b(?:jdbcTemplate|namedParameterJdbcTemplate|simpleJdbcTemplate|jdbc|jt)\s*\.\s*(?:query|queryForObject|queryForList|queryForMap|queryForRowSet|update|execute|batchUpdate)"
+        r"\s*\(\s*(?!['\"\d)])\s*[a-z_]\w*"
+        r"(?:\s*\.\s*(?:toString|append|build|concat|format|valueOf|readLine|read|join|replace|edit|getParameter|getHeader|getQueryString|getRequestURI|getRequestURL|getProperty|getenv|getUsername|getEmail|getTable|getSql|getCode|getBody)\s*\([^;\n]*\)\s*)+"
+        r")",
+        "A JDBC / Spring JdbcTemplate SQL sink fed a concatenated or request-derived query string — CWE-89 SQL injection. Statement.execute*, Connection.prepareStatement and JdbcTemplate.query/update/execute hand the string to the driver: request input concatenated with '+' or a builder/.toString() chain crosses into the DB, so an attacker can inject OR/UNION fragments, comment out the remainder, or stack statements (categoryA; DROP TABLE…). Use parameterized SQL — PreparedStatement with ? binds, JdbcTemplate query(sql, params, mapper) / named parameters (:name) — and keep every query fragment a fixed server-side constant; never concatenate user input into the SQL text",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

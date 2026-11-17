@@ -2257,6 +2257,81 @@ def test_ssrf_java_literal_const_or_other_targets_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R057-ssrf"], issues
 
 
+def test_jdbcsqli_concat_or_request_derived_sql_flagged():
+    """R058-jdbcsqli fires when a JDBC Statement/PreparedStatement or Spring
+    JdbcTemplate sink receives a concatenated, request-derived or builder-
+    chain SQL string — '"...' + lowercase identifier, a bare request accessor
+    / builder .toString() argument, a createStatement().execute* chain, or a
+    template query/update/execute (CWE-89: the SQL text crosses into the JDBC
+    driver, so request input can inject OR/UNION or stack statements)."""
+    src = (
+        'stmt.executeQuery("SELECT * FROM users WHERE id = " + userId);\n'
+        'st.executeUpdate("DELETE FROM orders WHERE id = " + orderId);\n'
+        'ps.executeUpdate("UPDATE accounts SET balance = " + amount);\n'
+        'pstmt.execute("DROP TABLE " + tbl);\n'
+        'statement.executeLargeUpdate("INSERT INTO log VALUES(" + msg + ")");\n'
+        'stmt.executeQuery(request.getParameter("query"));\n'
+        'ps.executeUpdate(req.getParameter("sql"));\n'
+        "stmt.executeQuery(queryBuilder.toString());\n"
+        'statement.executeUpdate(sb.append("UPDATE t SET x=").append(val).toString());\n'
+        'conn.prepareStatement("SELECT * FROM products WHERE id = " + productId);\n'
+        'connection.prepareStatement("SELECT " + cols + " FROM t WHERE pk = " + key);\n'
+        'PreparedStatement ps = conn.prepareStatement(request.getParameter("sqlStr"));\n'
+        "conn.prepareStatement(builder.toString());\n"
+        'conn.createStatement().executeQuery("SELECT * FROM users WHERE name = " + name);\n'
+        'connection.createStatement().executeUpdate("DELETE FROM t" + suffix);\n'
+        'conn.createStatement().executeQuery(request.getParameter("id"));\n'
+        'jdbcTemplate.query("SELECT * FROM users WHERE id = " + id, mapper);\n'
+        "jdbcTemplate.update(\"UPDATE users SET role = '\" + role + \"'\");\n"
+        'namedParameterJdbcTemplate.queryForObject("SELECT " + col + " FROM t", map, String.class);\n'
+        'jdbcTemplate.queryForList("SELECT * FROM " + tableName);\n'
+        'jt.execute("TRUNCATE " + targetTable);\n'
+        'jdbcTemplate.queryForObject("SELECT count(*) FROM t WHERE c = " + code, Integer.class);\n'
+        'jdbcTemplate.update(request.getParameter("sqlDml"));\n'
+        "conn.createStatement().execute(builder.toString());\n"
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R058-jdbcsqli"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_jdbcsqli_literal_parameterized_or_other_targets_stay_quiet():
+    """R058-jdbcsqli stays quiet for parameterized (? / :name) queries, fully
+    literal SQL, UPPER_CASE SQL constants, ALL_CAPS concat operands, bare
+    Statement objects or no-arg execute(), setString binding, in-string
+    arithmetic, non-query string building, JdbcTemplate lambda receivers and
+    custom receivers — no fused JDBC sink receives concatenated input."""
+    src = (
+        'stmt.executeQuery("SELECT * FROM users WHERE id = 5");\n'
+        'ps.executeUpdate("UPDATE t SET x = 1");\n'
+        'pstmt.executeQuery("SELECT * FROM users WHERE id = ?");\n'
+        'conn.prepareStatement("SELECT * FROM users WHERE id = ?");\n'
+        'connection.prepareStatement("INSERT INTO t VALUES (?, ?)");\n'
+        "conn.prepareStatement(QUERY_BY_ID);\n"
+        "ps.executeQuery();\n"
+        "stmt.execute();\n"
+        "int n = stmt.executeUpdate();\n"
+        'jdbcTemplate.query("SELECT * FROM users", mapper);\n'
+        'jdbcTemplate.update("UPDATE users SET n = ? WHERE id = ?", name, id);\n'
+        'jdbcTemplate.queryForObject("SELECT count(*) FROM users", Integer.class);\n'
+        "import java.sql.Statement;\n"
+        "Statement stmt = connection.createStatement();\n"
+        "ps.setString(1, userInput);\n"
+        'namedParameterJdbcTemplate.update("UPDATE t SET n = :n", params);\n'
+        "jdbcTemplate.execute(connection -> connection.createStatement());\n"
+        'ResultSet rs = stmt.executeQuery(BASE_QUERY + " ORDER BY id");\n'
+        'stmt.executeQuery("SELECT * FROM t WHERE a+b = 2");\n'
+        'String sql = "SELECT * FROM users WHERE id = " + userId;\n'
+        "jdbcTemplate.query(sql, new RowMapper<U>() {});\n"
+        'ex.executeQuery("SELECT * FROM t");\n'
+        "statement.executeQuery(SQL_CONST);\n"
+        'conn.prepareStatement("SELECT " + COLUMNS);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R058-jdbcsqli"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2439,6 +2514,7 @@ def test_every_rule_has_test_exposure():
         "R055-spelinj",
         "R056-jpaqli",
         "R057-ssrf",
+        "R058-jdbcsqli",
     }
     assert exposed <= rids
     uncovered = rids - exposed
