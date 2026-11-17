@@ -410,7 +410,22 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   (`new URLClassLoader(...)`, `Thread.currentThread().getContextClassLoader()`,
   `getClass().getClassLoader()`), plain `(Type) clazz.newInstance()` creation,
   `clazz.getDeclaredMethods()[0]` array access and custom receivers like
-  `mapper.getMethod("toString")` stay quiet).
+  `mapper.getMethod("toString")` stay quiet), and Java HTTP response header
+  injection
+  (`response.setHeader`/`response.addHeader`/`setIntHeader`/`setDateHeader`
+  on the `response`/`resp`/`res`/`httpResponse`/`httpServletResponse`
+  receivers fed a `request.*` accessor (`getParameter`/`getHeader`/
+  `getQueryString`/`getRequestURI`) as the header **name** — the attacker
+  picks which security-critical header (Set-Cookie, CSP, HSTS) to override —
+  or as the value, a `'...' + lowercaseIdentifier` concat or a bare lowercase
+  variable — an embedded CR/LF splits the response so extra headers/cookies
+  can be injected — CWE-113; literal name+value pairs
+  (`setHeader("Content-Type", "application/json")`), constant values
+  (`serverName`, `"bar" + SUFFIX`), static status/error/size calls
+  (`setStatus`, `sendError`, `setContentType`, `setIntHeader("X-Limit", 100)`),
+  header READS (`response.getHeader(...)`), non-response receivers
+  (`wrapper.setHeader(...)`) and the `"Location"` header name
+  (owned by the open-redirect rule R060) stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

@@ -1841,6 +1841,44 @@ _RULE_TUPLES = [
         r")",
         "A Java reflection entry point selecting a class or member from client-controlled input — CWE-470 unsafe reflection. Class.forName, ClassLoader-family loadClass/defineClass and getMethod/getDeclaredMethod/getConstructor/getDeclaredConstructor lookups on a receiver chain (obj.getClass().getDeclaredMethod(...) included) resolve the target from a request accessor, a '+' concatenation or a bare variable: an attacker who controls the class/member name can instantiate arbitrary classes, reach internal components or invoke methods that were never meant to be client-selectable, and a bytecode-fed defineClass can load injected classes — gadget-driven RCE or privilege escalation. Keep a fixed allowlist of class/member names (never request-derived), validate input against it before any reflection call, and avoid dynamic invocations of untrusted classes; prefer switch-based dispatch over reflective lookup",
     ),
+    (
+        "R065-java4xx",
+        "security",
+        "high",
+        "Java HTTP response header injected from client-controlled input: response.setHeader / addHeader / setIntHeader / setDateHeader fed a request accessor, concatenated string or bare variable (CWE-113)",
+        # CWE-113 (Improper Neutralization of CRLF Sequences in HTTP Headers):
+        # HttpServletResponse-family header sinks — response.setHeader /
+        # addHeader / setIntHeader / setDateHeader on the response/resp/res/
+        # httpResponse/httpServletResponse receivers — write user-controlled
+        # bytes into an outgoing HTTP header.  When the header NAME is a
+        # request accessor result (getParameter/getHeader/getQueryString/
+        # getRequestURI — an attacker who picks the header name can override
+        # security-relevant headers like Set-Cookie, Content-Security-Policy
+        # or Location) or the VALUE is request-derived, concatenated
+        # ('prefix' + lowercaseIdentifier) or a bare lowercase variable, a
+        # CR/LF sequence in it splits the response and lets the attacker
+        # inject arbitrary headers, poison caching or, in classic variants,
+        # splice a body (response splitting).  setIntHeader/setDateHeader
+        # only fire on a request-derived NAME (their values are int/long —
+        # not CRLF-injectable).  The "Location" header name is excluded
+        # everywhere: R060-openredir owns Location for the open-redirect
+        # case, and both rules must not fire on the same line.  Literal
+        # header name+value pairs ("Content-Type", "application/json"),
+        # constant values (serverName, APP_VERSION, "bar" + SUFFIX),
+        # static status/error/size calls (setStatus, sendError,
+        # setContentType, setIntHeader("X-Limit", 100),
+        # setDateHeader with a constant), header READS (getHeader) and
+        # non-response receivers (wrapper/session setHeader) stay quiet.
+        # Java sources are case-sensitive CamelCase, so no inline flag
+        # (same convention as R053-R064).  Single-line contract.
+        r"(?:"
+        r"\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*(?:setHeader|addHeader|setIntHeader|setDateHeader)\s*\(\s*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\("
+        r"|\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*(?:setHeader|addHeader)\s*\(\s*(?![^,\n]*['\"]Location['\"])[^,\n]*,\s*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\("
+        r"|\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*(?:setHeader|addHeader)\s*\(\s*(?![^,\n]*['\"]Location['\"])[^,\n]*,\s*[^,\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*"
+        r"|\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*(?:setHeader|addHeader)\s*\(\s*(?![^,\n]*['\"]Location['\"])[^,\n]*,\s*(?!['\"\d])(?=[a-z_]\w*[a-z])(?:[a-z_]\w*)\s*\)"
+        r")",
+        "A Java HTTP response header is written from client-controlled input — CWE-113 CRLF injection / response splitting. response.setHeader / addHeader / setIntHeader / setDateHeader on the HttpServletResponse with a request accessor as the header NAME (the attacker picks security-critical headers like Set-Cookie or CSP to override) or a request-derived, concatenated or bare-variable VALUE: an embedded CR/LF terminates the header early and the attacker can inject additional headers, set cookies or split the response body, undoing transport/security controls the app expects to set. Sanitize or validate any value before writing it (strip CR/LF, allowlist characters), never let the client select the header name, and set integrity headers (CSP, X-Content-Type-Options, HSTS) from server config only; treat 'Location' (redirect target — R060) separately",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

@@ -2718,6 +2718,69 @@ def test_javareflect_literal_constant_or_acquisition_expressions_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R064-javareflect"], issues
 
 
+def test_java4xx_request_derived_or_string_built_header_flagged():
+    """R065-java4xx fires when a Java HttpServletResponse header sink —
+    setHeader / addHeader / setIntHeader / setDateHeader — writes a
+    request accessor result (as NAME or VALUE), a '+' concatenation or a
+    bare lowercase variable into the header (CWE-113: CRLF injection /
+    response splitting).  Location is excluded — R060-openredir owns it."""
+    src = (
+        'response.setHeader("X-Request-ID", request.getParameter("rid"));\n'
+        'response.setHeader("ETag", req.getHeader("If-None-Match"));\n'
+        'resp.addHeader("X-Trace-Id", request.getHeader("traceId"));\n'
+        'response.addHeader("Cache-Control", "max-age=" + maxAge);\n'
+        'response.setHeader("X-Backend", "svc" + backendName);\n'
+        'response.setHeader("X-User", userName);\n'
+        'resp.addHeader("X-Frame-Options", frameMode);\n'
+        'response.setHeader(request.getParameter("hname"), "deny");\n'
+        'httpResponse.setHeader("X-Custom", request.getQueryString());\n'
+        'response.setIntHeader(request.getHeader("hdrName"), 2048);\n'
+        'response.setHeader("X-Ops", "op" + opCode);\n'
+        'res.setHeader("X-Node", nodeId);\n'
+        'response.addHeader("Set-Cookie", sessionCookie);\n'
+        'response.setHeader("X-Stats", "total=" + hits);\n'
+        'httpServletResponse.setHeader("X-Req-URI", request.getRequestURI());\n'
+        'response.addHeader("X-Id", req.getParameter("extra"));\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R065-java4xx"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_java4xx_literal_constant_or_non_header_sinks_stay_quiet():
+    """R065-java4xx stays quiet for literal header name+value pairs,
+    constant values, Location headers (owned by R060-openredir),
+    status/error/size calls, header READS and non-response receivers —
+    nothing client-controlled reaches an outgoing header."""
+    src = (
+        'response.setHeader("Content-Type", "application/json");\n'
+        'response.addHeader("Cache-Control", "no-store");\n'
+        'response.setHeader("Location", "/login");\n'
+        'response.setHeader("Location", nextUrl);\n'
+        'response.setHeader("Location", request.getHeader("host"));\n'
+        'response.sendRedirect("/auth/login");\n'
+        'response.setStatus(302);\n'
+        'response.sendError(500);\n'
+        'response.setContentType("text/html");\n'
+        'response.setIntHeader("X-Limit", 100);\n'
+        'String rid = request.getParameter("rid");\n'
+        'response.setHeader("X-Id", config.getHeader("X-Id"));\n'
+        'response.setDateHeader("Expires", System.currentTimeMillis() + 3600000);\n'
+        'response.setHeader("X-Powered-By", SERVER_NAME);\n'
+        'response.setHeader("X-Version", "1.0.3");\n'
+        'response.addHeader("Vary", "Accept-Encoding");\n'
+        'wrapper.setHeader("X-A", "b");\n'
+        'String val = response.getHeader("X-Id");\n'
+        'response.setHeader("X-Foo", "bar" + SUFFIX);\n'
+        'response.setHeader("X-Static", STATIC_VALUE);\n'
+        'HttpHeaders headers = new HttpHeaders();\n'
+        'response.addHeader("Expires", "0");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R065-java4xx"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2907,6 +2970,7 @@ def test_every_rule_has_test_exposure():
         "R062-javaxxe",
         "R063-javapath",
         "R064-javareflect",
+        "R065-java4xx",
     }
     assert exposed <= rids
     uncovered = rids - exposed
