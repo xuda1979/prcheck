@@ -1455,6 +1455,58 @@ _RULE_TUPLES = [
         r")",
         "An expression-language statement built from non-literal input — CWE-917. SpEL.parseExpression / MVEL.eval / OGNL.getValue / ELProcessor.eval compile the string inside the JVM: request input can reach static-method invocation (SpEL T(java.lang.Runtime).getRuntime().exec(), OGNL @java.lang.Runtime@getRuntime().exec()) and execute code before any whitelist check runs. Evaluate expressions only from a server-side constant allow-list, precompile and cache known templates, and never concatenate request data into the expression string; sandbox the evaluation context (property access / method filtering) as defense-in-depth",
     ),
+    (
+        "R056-jpaqli",
+        "security",
+        "high",
+        "JPQL / HQL query built by string concatenation or a builder fed to EntityManager.createQuery / Hibernate session.createQuery",
+        # CWE-943 (Improper Neutralization of Special Elements in Data Query
+        # Logic): JPA EntityManager.createQuery / createNativeQuery /
+        # createNamedQuery and Hibernate session/createSQLQuery compile the
+        # given string as JPQL/HQL or SQL inside the JVM, so a query
+        # assembled with '+' concatenation of a lowercase identifier (request
+        # parameter, DTO field, config lookup, builder variable) or with a
+        # lowercase identifier method-chain argument (queryBuilder.toString(),
+        # sb.append(...).toString(), request.getParameter) yields an
+        # injection point: native queries pass raw fragments to the DB, and
+        # JPQL/HQL 1=1 tautologies / UNION / ORDER BY probes let an attacker
+        # read or drop data.  The '+'-concat discriminator requires a literal
+        # quote immediately before the '+' (or no quote earlier in the
+        # argument) so all-literal math inside a JPQL string
+        # ("... a+b ..."), concatenated UPPER_CASE constants and plain
+        # string-building outside a query sink stay quiet; bare-identifier
+        # arguments (cq/criteriaQuery/queryObject/QUERY_NAME) are the safe
+        # Criteria API or named-constant forms and stay quiet.  Sinks with a
+        # literal-first arg must be an actual Java query receiver (em /
+        # entityManager / manager / session / currentSession /
+        # sessionFactory.openSession() / entityManagerFactory
+        # .createEntityManager() / request.getSession()).  Java sources are
+        # case-sensitive CamelCase, so no inline flag (same convention as
+        # R053/R054/R055).  Single-line contract.
+        r"(?:\b(?:em|entityManager|manager|queryManager)\s*\.\s*(?:createQuery|createNamedQuery|createNativeQuery|createStoredProcedureQuery)"
+        r"\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|\b(?:session|currentSession|statelessSession)\s*\.\s*(?:createQuery|createNativeQuery|createSQLQuery)"
+        r"\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|(?:\bsessionFactory\s*\.\s*(?:getCurrentSession|openSession)\s*\(\s*\)|\bentityManagerFactory\s*\.\s*createEntityManager\s*\(\s*\)|\brequest\s*\.\s*getSession\s*\(\s*\))"
+        r"\s*\.\s*(?:createQuery|createNativeQuery|createSQLQuery|createNamedQuery|createStoredProcedureQuery)"
+        r"\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|\b(?:em|entityManager|manager|queryManager)\s*\.\s*(?:createQuery|createNamedQuery|createNativeQuery|createStoredProcedureQuery)"
+        r"\s*\(\s*[^'\")\n]*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|\b(?:session|currentSession|statelessSession)\s*\.\s*(?:createQuery|createNativeQuery|createSQLQuery)"
+        r"\s*\(\s*[^'\")\n]*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|(?:\bsessionFactory\s*\.\s*(?:getCurrentSession|openSession)\s*\(\s*\)|\bentityManagerFactory\s*\.\s*createEntityManager\s*\(\s*\)|\brequest\s*\.\s*getSession\s*\(\s*\))"
+        r"\s*\.\s*(?:createQuery|createNativeQuery|createSQLQuery|createNamedQuery|createStoredProcedureQuery)"
+        r"\s*\(\s*[^'\")\n]*\+\s*(?!['\"\d])[a-z_]\w*[^)\n]*\)"
+        r"|\b(?:em|entityManager|manager|queryManager)\s*\.\s*(?:createQuery|createNamedQuery|createNativeQuery|createStoredProcedureQuery)"
+        r"\s*\(\s*(?:request|req)\s*\."
+        r"|\b(?:session|currentSession|statelessSession)\s*\.\s*(?:createQuery|createNativeQuery|createSQLQuery)\s*\(\s*(?:request|req)\s*\."
+        r"|\b(?:em|entityManager|manager|queryManager)\s*\.\s*(?:createQuery|createNamedQuery|createNativeQuery|createStoredProcedureQuery)"
+        r"\s*\(\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf|readLine|read|join|replace|getParameter|getHeader|getBody|getQueryString|getRequestURI|getRemoteAddr|getSimpleName|getName|getProperty|getenv|setLength|delete)\s*\("
+        r"|\b(?:session|currentSession|statelessSession)\s*\.\s*(?:createQuery|createNativeQuery|createSQLQuery)"
+        r"\s*\(\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf|readLine|read|join|replace|getParameter|getHeader|getBody|getQueryString|getRequestURI|getRemoteAddr|getSimpleName|getName|getProperty|getenv|setLength|delete)\s*\("
+        r")",
+        "A JPQL / HQL / native SQL query assembled by string concatenation or a builder and fed to EntityManager.createQuery / createNativeQuery / Hibernate session.createQuery — CWE-943 data-query injection. Concatenating lowercase request input (request.getParameter, DTO fields, config values) into the query string lets an attacker smuggle OR clauses / UNION fragments (read data) or 1=1 tautologies (drop data); native queries pass fragments opaquely to the DB. Use createQuery(parameterized) / PreparedStatement-style setParameter bindings or the Criteria API builder, keep query fragments static server-side constants, and never concat user data into the JPQL/HQL string",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

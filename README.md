@@ -286,7 +286,22 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   request input can reach static-method invocation for pre-auth RCE — CWE-917;
   literal expression strings, `null` args, EL `setValue` writes,
   declarations, imports and custom parser-receiver names like
-  `QueryParser`/`sqlParser` stay quiet).
+  `QueryParser`/`sqlParser` stay quiet), JPQL / HQL query injection
+  (`EntityManager.createQuery` / `createNativeQuery` /
+  `createNamedQuery` / Hibernate `session.createQuery` /
+  `createSQLQuery` fed a string assembled by `'...' + lowerIdentifier`
+  literal concatenation, an unquoted `var + lower` expression, a
+  builder/`.toString()` chain (`queryBuilder.toString()`,
+  `sb.append(...).append(...).toString()`), or a `request.*` accessor
+  as the first argument (incl. `sessionFactory.openSession()`,
+  `entityManagerFactory.createEntityManager()` and
+  `request.getSession()` receivers) — JPQL/HQL/native fragments cross
+  to the DB so request input can smuggle tautologies/UNION clauses for
+  read or drop — CWE-943; parameterized `:param`/`?` queries,
+  Criteria-API `CriteriaQuery` builder objects, bare-identifier query
+  objects, UPPER_CASE concatenated constants, all-literal queries,
+  arithmetic inside a literal string and non-query string building stay
+  quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

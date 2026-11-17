@@ -2122,6 +2122,80 @@ def test_spelinj_literal_or_no_sink_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R055-spelinj"], issues
 
 
+def test_jpaqli_string_built_query_flagged():
+    """R056-jpaqli fires when a JPQL / HQL / native SQL query is assembled by
+    string concatenation or a builder and fed to a JPA EntityManager or
+    Hibernate session query sink — '+' literal-concat of a lowercase
+    identifier, a builder/.toString() chain, a request accessor, or an
+    unquoted 'var + lower' expression (CWE-943: the query string crosses
+    into the DB, so request input can smuggle OR/UNION fragments)."""
+    src = (
+        'TypedQuery<User> q = em.createQuery("SELECT u FROM User u WHERE u.name = " + name);\n'
+        'Query q = entityManager.createQuery("FROM Product WHERE price > " + price);\n'
+        'List<User> r = em.createQuery("SELECT u FROM User u WHERE u.id = " + request.getParameter("id")).getResultList();\n'
+        'Query q = em.createNativeQuery("SELECT * FROM " + tableName);\n'
+        'Query q = entityManager.createNativeQuery("SELECT * FROM " + user.getTable() + " WHERE id = " + id);\n'
+        'Query q = manager.createNamedQuery("User.findBy" + suffix);\n'
+        'Query q = em.createStoredProcedureQuery("find_" + procName);\n'
+        "Query q = em.createQuery(queryBuilder.toString());\n"
+        'Query q = em.createQuery(sb.append("FROM User WHERE name = ").append(userInput).toString());\n'
+        "Query q = em.createQuery(\"FROM User WHERE name = '\" + userInput + \"'\");\n"
+        'Query q = session.createQuery("FROM User WHERE id = " + userId);\n'
+        'Query q = currentSession.createNativeQuery("SELECT * FROM " + dynamicTable);\n'
+        'SQLQuery q = session.createSQLQuery("DELETE FROM " + table + " WHERE id=" + id);\n'
+        'TypedQuery<Item> tq = em.createQuery("SELECT i FROM Item i WHERE i.code = " + code, Item.class);\n'
+        'Query q = em.createQuery("FROM Order o WHERE o.state = " + state + " ORDER BY o.id");\n'
+        'Query q = em.createQuery(JPQL_SELECT + whereClause);\n'
+        'Query q = sessionFactory.getCurrentSession().createQuery("FROM " + tableName + " WHERE id = " + id);\n'
+        'TypedQuery<User> q = entityManager.createQuery(qb.toString(), User.class);\n'
+        'Query q = em.createQuery(request.getParameter("query"));\n'
+        'Query q = em.createQuery("FROM " + entity.getClass().getSimpleName() + " WHERE id = " + id);\n'
+        'Query q = em.createQuery(HEADER_PREFIX + req.getHeader("filter"));\n'
+        'Query q = entityManager.createQuery(queryText + dynamicSuffix);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R056-jpaqli"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_jpaqli_literal_bare_identifier_or_other_sinks_stay_quiet():
+    """R056-jpaqli stays quiet for parameterized (:param / ?) queries, the
+    Criteria API builder / TypedQuery<CriteriaQuery>, bare-identifier query
+    objects / UPPER_CASE constants, all-literal queries, arithmetic inside a
+    literal string, and non-query string building — no concatenated lowercase
+    input reaches a JPA / Hibernate query sink."""
+    src = (
+        'TypedQuery<User> q = em.createQuery("SELECT u FROM User u WHERE u.name = :name");\n'
+        'Query q = em.createQuery("FROM User WHERE id = :id").setParameter("id", id);\n'
+        'List<User> r = em.createQuery("SELECT u FROM User u WHERE u.active = true").getResultList();\n'
+        'TypedQuery<Item> tq = em.createQuery("SELECT i FROM Item i WHERE i.id = :id", Item.class);\n'
+        'Query q = em.createNativeQuery("SELECT * FROM users WHERE id = ?");\n'
+        "CriteriaBuilder cb = em.getCriteriaBuilder();\n"
+        "CriteriaQuery<User> cq = cb.createQuery(User.class);\n"
+        "TypedQuery<User> q = em.createQuery(cq);\n"
+        "Query q = em.createQuery(criteriaQuery);\n"
+        "Query q = em.createQuery(queryObject);\n"
+        'Query q = em.createQuery(cq.where(cb.equal(u.get("name"), "x")));\n'
+        "Query query = em.createQuery(QUERY_NAME);\n"
+        "em.createQuery(EMPTY);\n"
+        'Query q = em.createNamedQuery("User.findByEmail");\n'
+        'Query q = em.createStoredProcedureQuery("find_orders");\n'
+        'Query q = session.createQuery("FROM User WHERE name = :name");\n'
+        'Query q = session.createNativeQuery("SELECT * FROM users WHERE id = ?");\n'
+        'em.createQuery("SELECT u FROM User u WHERE u.id=" + "1");\n'
+        'em.createNativeQuery("SELECT * FROM log");\n'
+        "import javax.persistence.EntityManager;\n"
+        'Query q = em.createQuery("FROM User WHERE name = " + NAME_CONST);\n'
+        'em.createQuery("SELECT u.a+b FROM User u").getResultList();\n'
+        'Query q = em.createQuery("FROM User WHERE total > x + y");\n'
+        'session.createQuery("FROM User WHERE id = :id").setParameter("id", id).list();\n'
+        'String sql = "FROM User WHERE name = " + NAME_CONST;\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R056-jpaqli"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -2302,6 +2376,7 @@ def test_every_rule_has_test_exposure():
         "R053-javaexec",
         "R054-javadeser",
         "R055-spelinj",
+        "R056-jpaqli",
     }
     assert exposed <= rids
     uncovered = rids - exposed
