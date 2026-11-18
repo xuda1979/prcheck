@@ -2859,6 +2859,25 @@ _RULE_TUPLES = [
         r"(?:LoggerFactory|LogFactory)\s*\.\s*get(?:Logger|Log)\s*\([^)\n]*?\)\s*\.\s*(?:info|debug|trace|warn|warning|error|fatal)\s*\([^)\n]*?\b(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getRemoteAddr|getRemoteUser|getRequestedSessionId)\s*\()",
         "A Java log line carries client-controlled or session-sensitive values captured straight from the HTTP request into the application log — CWE-532 insertion of sensitive information into log file: request accessor results (getParameter/getHeader/getQueryString/getRequestURI) and session/identity data (getRemoteAddr/getRemoteUser/getRequestedSessionId) land as the message or are concatenated into it through log4j/slf4j/commons-logging / java.util.logging sinks. Logs are a low-trust surface: they are shipped to aggregators, SIEMs and support consoles and retained for years, so an attacker who can induce a bad parameter value — and anyone with log read access — learns the raw payload or session identity that never needed to persist. Log a safe correlation id or a sanitized/truncated summary instead of the raw accessor value, and never log session ids. Python/Node console / system-out injection (R036-loginj, CWE-117), sensitive-keyword content logging (D003), non-log sinks, server-side-only messages, literal-only messages and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R085-javacred",
+        "security",
+        "high",
+        "Java credentials material — username/password pairs for auth clients, datasources, JDBC or mail sessions — baked in as hardcoded string literals: new UsernamePasswordCredentials/BasicAWSCredentials/TokenCredentials/UsernamePasswordToken(..., ...), new PasswordAuthentication(\"u\", \"p\".toCharArray()), DriverManager.getConnection(url, \"user\", \"pass\"), client/datasource/builder .setPassword/.password/.credentials(\"...\") and Spring DataSourceBuilder [...].password(\"...\") chains (CWE-798)",
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"new\s+(?:UsernamePasswordCredentials|BasicAWSCredentials|UsernamePasswordToken|NtlmCredentials|BasicCredentials)\s*\(\s*[\"'][^\"']+[\"']\s*,\s*[\"'][^\"']+[\"'][^)\n]*?\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"new\s+TokenCredentials\s*\(\s*[\"'][^\"']+[\"']\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"new\s+PasswordAuthentication\s*\(\s*[\"'][^\"']+[\"']\s*,\s*[\"'][^\"']+[\"'](?:\s*\.\s*toCharArray\s*\(\s*\))?\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"DriverManager\s*\.\s*getConnection\s*\([^)\n]*,\s*[\"'][^\"']+[\"']\s*,\s*[\"'][^\"']+[\"']\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:client|clientBuilder|httpClient|builder|dataSource|datasource|mailSender|mongoClient|redisClient|auth)\w*\s*\.\s*(?:setPassword|password|withPassword|credentials)\s*\(\s*[\"'][^\"']+[\"'](?:\s*,\s*[\"'][^\"']+[\"'])?\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"DataSourceBuilder\s*\.\s*create\s*\([^;\n]*?\.\s*password\s*\(\s*[\"'][^\"']+[\"']\s*\))",
+        "A Java program embeds plaintext credential arguments in constructor or accessor calls — CWE-798 use of hard-coded credentials, distinct from URL/DSN-literal credentials (R037-credurl) and from key material (R082-javasecret, CWE-321): Apache HttpComponents UsernamePasswordCredentials / TokenCredentials / NTLM credentials, AWS BasicAWSCredentials / token authentication, JavaMail PasswordAuthentication, JDBC DriverManager.getConnection(url, \"user\", \"pass\"), HTTP-client .credentials(...), datasource/connection builder .setPassword/.password(\"...\") and Spring DataSourceBuilder.create()[...].password(\"...\"). Anyone with repo or artifact access silently gains every environment's access: stolen AWS/Azure/DB/mail credentials are replayed wholesale. Load credentials from a secret manager / vault / env vars at runtime (new UsernamePasswordCredentials(vaultUser, vaultPass), getConnection(url, System.getenv(\"DB_USER\"), System.getenv(\"DB_PASS\"))), rotate promptly if literals were ever committed, and commit only test-only placeholders (placeholder-y values like \"changeme\" aside). Variable/env/config-sourced credentials, non-credential method calls, URL/DSN-literal secrets (R037-credurl), key material (R082-javasecret) and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

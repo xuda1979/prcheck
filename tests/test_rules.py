@@ -4013,6 +4013,48 @@ def test_javalog_server_side_messages_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R084-javalog"], issues
 
 
+def test_javacred_literal_credentials_flagged():
+    """R085-javacred fires when a Java auth-client / datasource / JDBC / mail
+    credential argument is a hardcoded string literal (CWE-798)."""
+    src = (
+        'new UsernamePasswordCredentials("admin", "s3cr3t").getUserPrincipal();\n'
+        'new BasicAWSCredentials("AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCY");\n'
+        'new TokenCredentials("AbCdEfGhIjKlMnOpQrStUvWxYz");\n'
+        'new UsernamePasswordToken("bob", "pa55w0rd", true);\n'
+        'new PasswordAuthentication("svcacct", "mailpass".toCharArray());\n'
+        'DriverManager.getConnection(url, "root", "toor123");\n'
+        'client.credentials("api-usr", "api-key-9f2c");\n'
+        'dataSource.setPassword("DbP@ssw0rd!");\n'
+        'MongoClient mongo = new MongoClient(host, auth.credentials("mongoUsr", "mongoPass"));\n'
+        'DataSourceBuilder.create().url(jdbcUrl).username("app").password("appSecret").build();\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R085-javacred"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javacred_runtime_credentials_stay_quiet():
+    """R085-javacred stays quiet when credentials come from variables/env/config
+    or when the call is not a credential sink — and for URL-literal credentials
+    (R037-credurl) and key material (R082-javasecret), which other rules own."""
+    src = (
+        'new UsernamePasswordCredentials(vaultUser, vaultPass);\n'
+        'new PasswordAuthentication(configMailUser, configMailPass.toCharArray());\n'
+        'DriverManager.getConnection(url, System.getenv("DB_USER"), System.getenv("DB_PASS"));\n'
+        'dataSource.setPassword(secretStore.fetch("db.password"));\n'
+        'client.credentials(serviceAccountUsername, tokenFromVault);\n'
+        'DataSourceBuilder.create().url(jdbcUrl).username(dbUserProp).password(dbPassProp).build();\n'
+        'new UsernamePasswordCredentials("admin", passFromVar);\n'
+        'TargetDataSrc dsUri = new TargetDataSrc("jdbc:mysql://root:secret@db:3306/app");\n'
+        'new SecretKeySpec("0123456789abcdef".getBytes(), "AES");\n'
+        '// new BasicAWSCredentials("AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCY")\n'
+        'String tpl = "DriverManager.getConnection(url, \\"root\\", \\"toor123\\")";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R085-javacred"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4222,6 +4264,7 @@ def test_every_rule_has_test_exposure():
         "R082-javasecret",
         "R083-javaopen",
         "R084-javalog",
+        "R085-javacred",
     }
     assert exposed <= rids
     uncovered = rids - exposed
