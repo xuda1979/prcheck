@@ -2089,6 +2089,11 @@ def test_spelinj_non_literal_expression_flagged():
         "elProcessor.eval(input);\n"
         "Object r = ExpressionFactory.newInstance().createValueExpression(elContext, expr, String.class);\n"
         "Object r = ExpressionFactory.newInstance().createMethodExpression(elCtx, userExpr, String.class, null);\n"
+        "Object v = elp.setValue(propName, val);\n"
+        "Object v = factory.createValueExpression(context, userExpr, Object.class);\n"
+        'Object v = exprFactory.createValueExpression(ctx, request.getParameter("e"), String.class);\n'
+        'Object v = elProcessor.eval("#{bean." + prop + "}");\n'
+        'Object v = spelParser.parseExpression("user.name" + suffix);\n'
     )
     issues, _ = analyze_to_issues(_inline_diff(src))
     hits = [i for i in issues if i.rule_id == "R055-spelinj"]
@@ -2098,8 +2103,9 @@ def test_spelinj_non_literal_expression_flagged():
 
 def test_spelinj_literal_or_no_sink_stays_quiet():
     """R055-spelinj stays quiet for literal expression strings, declarations,
-    imports, custom-receiver parser names, null args and MVEL / OGNL value
-    writes — no non-literal expression reaches an EL sink."""
+    imports, custom-receiver parser names, SCREAMING_SNAKE expression
+    constants, null args, and MVEL / OGNL value writes — no non-literal
+    expression reaches an EL sink."""
     src = (
         'Expression exp = new SpelExpressionParser().parseExpression("ROLE_USER");\n'
         'Expression exp = parser.parseExpression("user.id");\n'
@@ -2117,6 +2123,30 @@ def test_spelinj_literal_or_no_sink_stays_quiet():
         "elProcessor.eval(null);\n"
         'String sql = "SELECT " + userCol + " FROM t";\n'
         "exprHandler.eval(userInput);\n"
+        "parser.parseExpression(DEFAULT_EXPR);\n"
+        "MVEL.eval(BOOT_EXPR);\n"
+        "Ognl.getValue(DEFAULT_OGNL, root);\n"
+        "elp.setValue(DEFAULT_NAME, value);\n"
+        "Object r = Ognl.getValue(null, root);\n"
+        "Integer n = MVEL.eval(42);\n"
+        'Object v = factory.createValueExpression(context, "#{bean.prop}", Object.class);\n'
+        'Object v = factory.createValueExpression(context, "#{bean." + prop + "}", Object.class);\n'
+        'Object v = elp.setValue("name", value);\n'
+        'engine.eval(request.getParameter("x"));\n'
+        "groovyShell.evaluate(code);\n"
+        "interpreter.eval(userCode);\n"
+        "jshell.eval(script);\n"
+        'config.getExpression("x");\n'
+        "mvel.eval(code);\n"
+        'request.getParameter("expr");\n'
+        "sqlParser.parseExpression();\n"
+        "Comparator c = parser.parseExpr(token);\n"
+        '// spelParser.parseExpression(request.getParameter("expr"));\n'
+        "// elProcessor.eval(userExpr);\n"
+        "// Ognl.getValue(ognlExpr, root);\n"
+        'String s = "parser.parseExpression(expr);";\n'
+        'String t = "MVEL.eval(code);";\n'
+        'String u = "elProcessor.eval(\\"#{a.b}\\");";\n'
     )
     issues, _ = analyze_to_issues(_inline_diff(src))
     assert not [i for i in issues if i.rule_id == "R055-spelinj"], issues

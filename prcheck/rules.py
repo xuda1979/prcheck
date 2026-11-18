@@ -1434,25 +1434,46 @@ _RULE_TUPLES = [
         # javax/jakarta Unified EL all compile and run the expression string
         # inside the JVM — so an expression built from request input can call
         # arbitrary static methods (Runtime.exec via T()/newInstance, OGNL's
-        # @java.lang.Runtime@getRuntime().exec), i.e. pre-auth RCE.  The sink
-        # must receive a *constructed* expression: either a bare identifier /
-        # method chain / concatenated '+'-variable first argument, or an
-        # ExpressionFactory.createValue/MethodExpression whose expression
-        # argument (the one right after the first comma — a scoped [^),] so
-        # the second comma before a return-type argument isn't mistaken) is a
-        # non-literal.  Static literal strings, null first args, plain MVEL /
-        # OGNL setValue writes, imports, declarations and custom-receiver
-        # names that merely echo the parser vocabulary (QueryParser,
-        # sqlParser, XmlParser) carry no fused sink and stay quiet.  Java
-        # sources are case-sensitive CamelCase, so no inline (?i) flag is used
-        # (same convention as R053/R054).  Single-line contract.
-        r"(?:\b(?:new\s+)?(?:SpelExpressionParser|TemplateAwareExpressionParser)\s*\(\s*\)\s*\.\s*parseExpression\s*\((?!['\"]|new\b)\s*[A-Za-z_]\w*[^)\n]*\)"
-        r"|\b(?:parser|expressionParser|spelParser|spelExpressionParser|elParser|templateParser)\b\s*\.\s*parseExpression\s*\((?!['\"]|new\b)\s*[A-Za-z_]\w*[^)\n]*\)"
-        r"|\b(?:MVEL|Ognl(?:Util)?)\s*\.\s*(?:eval|compileExpression|executeExpression|getValue|parseExpression)\s*\((?!['\"]|new\b|null\b|\d)\s*[A-Za-z_]\w*[^)\n]*\)"
-        r"|(?:\bnew\s+ELProcessor\b|\belProcessor\b)\s*(?:\(\s*\))?\s*\.\s*eval\s*\((?!['\"]|new\b|null\b|\d)\s*[A-Za-z_]\w*[^)\n]*\)"
-        r"|\bExpressionFactory\s*\.\s*newInstance\s*\(\s*\)\s*\.\s*create(?:Value|Method)Expression\s*\([^),]*,\s*(?!['\"]|new\b|null\b|\d)\s*[A-Za-z_]\w*[^)\n]*\)"
-        r"|\b(?:MVEL|Ognl(?:Util)?)\s*\.\s*(?:eval|getValue|compileExpression|executeExpression|parseExpression)\s*\([^)\n]*['\"]\s*\+\s*[A-Za-z_]\w*[^)\n]*\)"
-        r")",
+        # @java.lang.Runtime@getRuntime().exec), i.e. pre-auth RCE.  Branch
+        # layout (single-line contract; Java sources are case-sensitive
+        # CamelCase, so no inline (?i) flag is used):
+        #   BR1 SpEL — new (SpelExpressionParser|TemplateAwareExpressionParser)
+        #        or a named parser receiver (parser / expressionParser /
+        #        spelParser / spelExpressionParser / elParser /
+        #        templateParser), then parseExpression(non-literal).  A
+        #        SCREAMING_SNAKE constant concatenated with a variable
+        #        (SPEL_TEMPLATE_PREFIX + userToken) still counts as a
+        #        constructed expression.
+        #   BR2 OGNL static — Ognl.getValue / Ognl.parseExpression (incl.
+        #        OgnlUtil).
+        #   BR3 MVEL static — MVEL.eval / compileExpression /
+        #        executeExpression.
+        #   BR4 javax.el — new ELProcessor() chain or elProcessor / elp
+        #        receiver, then eval / setValue / getValue.
+        #   BR5 ExpressionFactory.newInstance().createValueExpression /
+        #        createMethodExpression, or named receivers expressionFactory /
+        #        exprFactory / eFactory / factory — the expression is the
+        #        SECOND argument, scoped to the first comma.
+        #   BR6 literal-prefix + variable concat at the same receivers
+        #        (elProcessor.eval("#{bean." + prop + "}")).
+        # NLARG (the non-literal argument marker shared with the R072/R073/
+        # R076 Java series) rejects quoted literals, new-expressions, null,
+        # numbers and SCREAMING_SNAKE constants; every branch carries the
+        # multi-part comment/literal boundary so comment / string-literal
+        # reproductions die on it.  Literal expressions in every sink form,
+        # constant expressions, null/number args, EL setValue writes addressed
+        # to a literal, declarations, imports, script-engine eval receivers
+        # (engine/groovyShell/interpreter/jshell — R072's domain) and
+        # custom-receiver names echoing the parser vocabulary (QueryParser,
+        # sqlParser, XmlParser, exprHandler, config.getExpression, lower-case
+        # mvel.eval) stay quiet.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)(?:(?:new\s+(?:SpelExpressionParser|TemplateAwareExpressionParser)\s*\([^)\n]*\)\s*\.\s*)|(?:\b(?:parser|expressionParser|spelParser|spelExpressionParser|elParser|templateParser)\b\s*\.\s*))parseExpression\s*\(\s*(?:(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*|[A-Z][A-Z0-9_]{2,}\b\s*\+\s*[A-Za-z_]\w*)[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)\bOgnl(?:Util)?\s*\.\s*(?:getValue|parseExpression)\s*\(\s*(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)\bMVEL\s*\.\s*(?:eval|compileExpression|executeExpression)\s*\(\s*(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)(?:new\s+ELProcessor\s*\([^)\n]*\)\s*\.\s*|\b(?:elProcessor|elp)\b\s*\.\s*)(?:eval|setValue|getValue)\s*\(\s*(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)(?:\bExpressionFactory\s*\.\s*newInstance\s*\(\s*\)\s*\.\s*|\b(?:expressionFactory|exprFactory|eFactory|factory)\b\s*\.\s*)create(?:Value|Method)Expression\s*\([^),\n]*\s*,\s*(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)\b(?:Ognl(?:Util)?|MVEL|spelParser|expressionParser|eParser|parser|elProcessor|elp)\b\s*\.\s*(?:getValue|parseExpression|eval|compileExpression|executeExpression)\s*\([^)\n]*['\"]\s*\+\s*(?!['\" ]|\d|[A-Z][A-Z0-9_]{2,}\b)[A-Za-z_]\w*)"
+        ,
         "An expression-language statement built from non-literal input — CWE-917. SpEL.parseExpression / MVEL.eval / OGNL.getValue / ELProcessor.eval compile the string inside the JVM: request input can reach static-method invocation (SpEL T(java.lang.Runtime).getRuntime().exec(), OGNL @java.lang.Runtime@getRuntime().exec()) and execute code before any whitelist check runs. Evaluate expressions only from a server-side constant allow-list, precompile and cache known templates, and never concatenate request data into the expression string; sandbox the evaluation context (property access / method filtering) as defense-in-depth",
     ),
     (

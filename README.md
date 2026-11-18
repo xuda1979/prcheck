@@ -284,9 +284,17 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   expression — a request-derived variable, method chain or
   `+`-concatenated string: EL engines compile the string in the JVM, so
   request input can reach static-method invocation for pre-auth RCE — CWE-917;
-  literal expression strings, `null` args, EL `setValue` writes,
-  declarations, imports and custom parser-receiver names like
-  `QueryParser`/`sqlParser` stay quiet), JPQL / HQL query injection
+  also fires on `elProcessor`/`elp` receivers' `setValue`/`getValue`,
+  `expressionFactory`/`exprFactory`/`eFactory`/`factory`
+  `createValueExpression(..)` with the expression as its second argument, and
+  literal-prefix `+`-variable concatenations
+  (`elProcessor.eval("#{bean." + prop + "}")`); literal expression strings,
+  SCREAMING_SNAKE expression constants, `null`/number args, EL `setValue`
+  writes addressed to a literal, script-engine `.eval` receivers (R072's
+  `engine.eval(..)`/`groovyShell.evaluate(..)`/`interpreter.eval(..)`/
+  `jshell.eval(..)` domain), declarations, imports and custom
+  parser-receiver names like `QueryParser`/`sqlParser` stay quiet), JPQL /
+  HQL query injection
   (`EntityManager.createQuery` / `createNativeQuery` /
   `createNamedQuery` / Hibernate `session.createQuery` /
   `createSQLQuery` fed a string assembled by `'...' + lowerIdentifier`
