@@ -4055,6 +4055,47 @@ def test_javacred_runtime_credentials_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R085-javacred"], issues
 
 
+def test_javamail_request_derived_headers_flagged():
+    """R086-javamail fires when a Java mail header/subject/recipient setter is
+    fed a request accessor result (CWE-93)."""
+    src = (
+        'message.setSubject(request.getParameter("subject"));\n'
+        'msg.setSubject("Order ref " + request.getHeader("X-Ref"));\n'
+        'mimeMessage.setHeader("X-Trace", request.getParameter("trace"));\n'
+        'mail.setFrom(request.getParameter("from"));\n'
+        'helper.setReplyTo(request.getParameter("replyto"));\n'
+        'message.setRecipients(RecipientType.TO, request.getParameter("to"));\n'
+        'simpleMailMessage.setTo(request.getQueryString());\n'
+        'mimeMessageHelper.addCc(request.getHeader("cc"));\n'
+        'email.addBcc("bcc" + request.getParameter("b"));\n'
+        'Message msg = new MimeMessage(session); msg.setSubject(request.getRequestURI());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R086-javamail"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javamail_constant_values_stay_quiet():
+    """R086-javamail stays quiet for constant/config/variable mail values,
+    non-mail setters, and for the sibling sinks other rules own."""
+    src = (
+        'message.setSubject("Password reset for " + accountName);\n'
+        'msg.setFrom(config.getProperty("mail.from"));\n'
+        'mimeMessage.setHeader("Content-Type", "text/plain");\n'
+        'helper.setTo(userEmail);\n'
+        'simpleMailMessage.setReplyTo(supportAddress);\n'
+        'message.setRecipients(RecipientType.TO, teamAlias);\n'
+        'response.setHeader("X-Custom", request.getParameter("h"));\n'
+        'logger.info("reset link sent to " + request.getParameter("to"));\n'
+        'mailSender.setPassword("mail-pass-9f2c");\n'
+        '// message.setSubject(request.getParameter("subject"))\n'
+        'String tpl = "message.setSubject(request.getParameter(\\"subject\\"))";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R086-javamail"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4265,6 +4306,7 @@ def test_every_rule_has_test_exposure():
         "R083-javaopen",
         "R084-javalog",
         "R085-javacred",
+        "R086-javamail",
     }
     assert exposed <= rids
     uncovered = rids - exposed
