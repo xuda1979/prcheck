@@ -2891,6 +2891,27 @@ _RULE_TUPLES = [
         r"\b(?:message|msg|mimeMessage|simpleMailMessage|mailMessage|mail|email|helper|mimeMessageHelper)\w*\s*\.\s*(?:setFrom|setReplyTo|setRecipients|setRecipient|setTo|setCc|setBcc|addTo|addCc|addBcc)\s*\([^)\n]*?\b(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\()",
         "A Java email message carries client-controlled data in a header, subject, sender, reply-to or recipient field — CWE-93 improper neutralization of CRLF sequences in email headers. JavaMail MimeMessage.setSubject / setHeader / setFrom / setReplyTo / setRecipients and Spring SimpleMailMessage / MimeMessageHelper .setSubject / .setFrom / .setTo / .setCc / .setBcc / .setReplyTo / .addTo / .addCc / .addBcc / .setHeader receive a request accessor result (getParameter/getHeader/getQueryString/getRequestURI) directly or concatenated into the argument: a CR/LF in the value breaks the sender trusts the canonical MTA's header parse — an attacker can add Bcc:/Reply-To:/headers of their choosing, efail-style exfiltration to their own inbox, spoofed From/Reply-To for phishing, or injection of arbitrary mail headers that leak conversation participants. Distinct from HTTP response header injection (R065-java4xx / R035-hdrinj, CWE-113) which owns response.setHeader-family sinks; this rule owns Java mail-header/subject/recipient sinks only. Validate and strip CR/LF (and Unicode newline variants) from any request-derived mail field, prefer structured APIs (message.setRecipient(Message.RecipientType.TO, new InternetAddress(...)) with a validated address) and a server-side allowlist for From/Reply-To; never pass raw request input into setSubject/setHeader/recipient lists. Constant values, variables/config-sourced values, response-header sinks (R065/R035), logging sinks (R036-loginj/R084-javalog), credential literals (R085-javacred) and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R087-javaerr",
+        "security",
+        "high",
+        "Java exception/stack-trace details leaked into the HTTP response: response.getWriter().print/println/write/append of e.getMessage()/getLocalizedMessage(), e.printStackTrace(response.getWriter()/resp.getWriter()), response.sendError(code, e.getMessage()) and Spring @ResponseBody / ResponseEntity bodies returning the exception message (CWE-209)",
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*getWriter\s*\(\s*\)\s*\.\s*(?:print|println|write|append)\s*\([^)\n]*?[a-z]\w*\s*\.\s*(?:getMessage|getLocalizedMessage)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"@ResponseBody\b[^\n]*\breturn\s+[a-z]\w*\s*\.\s*(?:getMessage|getLocalizedMessage)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"new\s+ResponseEntity\s*(?:<[^;()\n]*>)?\s*\([^)\n]*?[a-z]\w*\s*\.\s*(?:getMessage|getLocalizedMessage)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"ResponseEntity\s*\.\s*(?:ok|badRequest|status|of)\s*\([^)\n]*?[a-z]\w*\s*\.\s*(?:getMessage|getLocalizedMessage)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"ResponseEntity\s*\.\s*(?:ok|badRequest|status|of)\s*\(\s*\)\s*\.\s*body\s*\([^)\n]*?[a-z]\w*\s*\.\s*(?:getMessage|getLocalizedMessage)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*sendError\s*\([^)\n]*?[a-z]\w*\s*\.\s*(?:getMessage|getLocalizedMessage)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"[a-z]\w*\s*\.\s*printStackTrace\s*\(\s*(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*getWriter\s*\(\s*\)\s*\))",
+        "A Java HTTP response carries exception-internal detail back to the client — CWE-209 generation of an error message containing sensitive information. The server writes e.getMessage()/getLocalizedMessage() (often the underlying SQL/JDBC text, filesystem paths, class names, host names or stack frames that produced the failure) into response.getWriter().print/println/write/append, sends it via response.sendError(code, e.getMessage()), prints a full stack trace to the response writer with e.printStackTrace(response.getWriter()), or returns a Spring @ResponseBody / ResponseEntity body built from the exception message: every one of those details is attacker-invokable by simply triggering the error, and leaks internals that make targeted exploitation (SQL probe feedback, library/framework fingerprinting, EXIF paths) far easier. Distinct from R067-javaxss (request-derived echo, CWE-79), R065-java4xx / R035-hdrinj (header writes, CWE-113), R083-javaopen (request-accessor @ResponseBody/ResponseEntity echo, CWE-116) and R084-javalog / R036-loginj (logging sinks, CWE-532/117) — this rule owns exception-message/stack-trace exposure to the HTTP client only. Log the full exception server-side, return a generic message + a correlation/request id to the client, and in an @ExceptionHandler map known failure types to safe, fixed user-facing texts. Literal/generic error output (\"Something went wrong\"), console/log writes, exception creation/throws without a response sink, header writes, request-derived echoes (R067/R083), and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

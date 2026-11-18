@@ -4096,6 +4096,48 @@ def test_javamail_constant_values_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R086-javamail"], issues
 
 
+def test_javaerr_exception_details_flagged():
+    """R087-javaerr fires when an exception message/stack trace is written to
+    the HTTP client (CWE-209)."""
+    src = (
+        'response.getWriter().println(e.getMessage());\n'
+        'resp.getWriter().print("Failed: " + exc.getMessage());\n'
+        'res.getWriter().append(error.getLocalizedMessage());\n'
+        'response.getWriter().write(exception.getMessage());\n'
+        '@ResponseBody public String err() { return error.getLocalizedMessage(); }\n'
+        'new ResponseEntity<>(e.getMessage(), HttpStatus.BAD_REQUEST);\n'
+        'ResponseEntity.badRequest().body(ex.getMessage());\n'
+        'response.sendError(500, e.getMessage());\n'
+        'e.printStackTrace(response.getWriter());\n'
+        'httpServletResponse.getWriter().println(e.getLocalizedMessage());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R087-javaerr"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaerr_generic_errors_stay_quiet():
+    """R087-javaerr stays quiet for literal/generic error output, console/log
+    writes, exception handling without a response sink, and the sibling sinks
+    other rules own."""
+    src = (
+        'response.getWriter().println("Something went wrong");\n'
+        'e.printStackTrace();\n'
+        'logger.error("failed", e);\n'
+        'e.printStackTrace(System.err);\n'
+        'throw new RuntimeException("bad");\n'
+        'response.setHeader("X-Err", request.getHeader("h"));\n'
+        'response.getWriter().println(request.getParameter("p"));\n'
+        '// response.getWriter().println(e.getMessage())\n'
+        'String tpl = "response.getWriter().println(e.getMessage())";\n'
+        'String msg = ex.getMessage();\n'
+        'response.getWriter().println("code=" + ERROR_CODE);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R087-javaerr"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4307,6 +4349,7 @@ def test_every_rule_has_test_exposure():
         "R084-javalog",
         "R085-javacred",
         "R086-javamail",
+        "R087-javaerr",
     }
     assert exposed <= rids
     uncovered = rids - exposed
