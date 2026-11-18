@@ -3848,6 +3848,49 @@ def test_javajwt_unsecured_or_none_negatives_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R080-javajwt"], issues
 
 
+def test_javapw_plaintext_or_weak_scheme_flagged():
+    """R081-javapw fires when the added line stores or derives a Java password
+    with a plaintext/no-op or weak non-adaptive scheme (CWE-916 insufficient
+    computational effort in password hashing): Spring Security's
+    NoOpPasswordEncoder.getInstance() keeps credentials verbatim, a {noop}
+    delegating prefix marks a stored value as plaintext, and the deprecated
+    MessageDigestPasswordEncoder / LdapShaPasswordEncoder /
+    StandardPasswordEncoder apply fast non-adaptive digests."""
+    src = (
+        'PasswordEncoder encoder = NoOpPasswordEncoder.getInstance();\n'
+        'return NoOpPasswordEncoder.getInstance();\n'
+        'encoded = "{noop}" + rawPassword;\n'
+        'credentials.setValue("{noop}" + plaintext);\n'
+        'new MessageDigestPasswordEncoder("MD5")\n'
+        'PasswordEncoder ldap = new LdapShaPasswordEncoder();\n'
+        'new StandardPasswordEncoder()\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R081-javapw"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javapw_plaintext_or_weak_scheme_negatives_stay_quiet():
+    """R081-javapw stays quiet for adaptive KDF encoders (BCrypt/Argon2/
+    Pbkdf2/SCrypt), the delegating factory, digest-utility calls, and
+    comment/string-literal reproductions of the weak marker names."""
+    src = (
+        'PasswordEncoder encoder = new BCryptPasswordEncoder(12);\n'
+        'return new Argon2PasswordEncoder();\n'
+        'encoded = pbkdf2Encoder.encode(rawPassword);\n'
+        'PasswordEncoder scrypt = new SCryptPasswordEncoder();\n'
+        'encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();\n'
+        'String digest = DigestUtils.sha256Hex(rawPassword);\n'
+        'encoded = "{bcrypt}" + bcryptEncoder.encode(rawPassword);\n'
+        '// NoOpPasswordEncoder.getInstance()\n'
+        '// new MessageDigestPasswordEncoder()\n'
+        'String s = "{noop}not-a-store";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R081-javapw"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4053,6 +4096,7 @@ def test_every_rule_has_test_exposure():
         "R078-javatpl",
         "R079-javacors",
         "R080-javajwt",
+        "R081-javapw",
     }
     assert exposed <= rids
     uncovered = rids - exposed

@@ -2799,6 +2799,19 @@ _RULE_TUPLES = [
         r"JwtDecoders\s*[.]\s*none\s*\()",
         "A Java JWT parser accepts unsigned or attacker-chosen tokens — CWE-347 improper verification of cryptographic signature: jjwt's Jwts.parser().parseUnsecuredContent(...) / .unsecured().allowUnsecured(...) skip verification entirely, a legacy Jwts.parser().setSigningKey(null | \"\" | new byte[0]) asks a key-based parser to verify with a key that cannot exist, SignatureAlgorithm.NONE / JWSAlgorithm.NONE admit the 'none'/unsigned algorithm (alg-confusion), and JwtDecoders.none() decodes unsigned tokens. A forged admin token for any of these is then trusted as genuine. Always verify with a strong key from a secret store (jjwt 0.12+ .verifyWith(SecretKey).build().parseSignedClaims, legacy setSigningKey(runtimeKey)), reject the 'none' algorithm (jjwt 0.12 Configuration rejects it by default; keep a strict algorithm allow-list for Nimbus JWSVerificationKeySelector), and decode only issuer-verified signed tokens (JwtDecoders.fromIssuerLocation(...)). Verified chains with runtime keys, issuer-based decoders, strong-algorithm constants, signing-only code and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R081-javapw",
+        "security",
+        "high",
+        "Java password store uses a plaintext/no-op or weak non-adaptive hashing scheme (Spring NoOpPasswordEncoder / {noop} / MessageDigestPasswordEncoder / LdapShaPasswordEncoder) — CWE-916",
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"NoOpPasswordEncoder\s*[.]\s*getInstance\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"[\"']\{noop\}[^\"'\n]*[\"']\s*\+)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"new\s+(?:MessageDigestPasswordEncoder|LdapShaPasswordEncoder|StandardPasswordEncoder)\s*\()",
+        "A Java password store is coupled to a plaintext/no-op or weak non-adaptive hashing scheme — CWE-916 insufficient computational effort in password hashing: Spring Security's NoOpPasswordEncoder.getInstance() performs no hashing at all (the credential is kept verbatim), a stored value carrying the {noop} delegating prefix is treated as plaintext (DelegatingPasswordEncoder migration markers must never reach a live store), and the deprecated MessageDigestPasswordEncoder / LdapShaPasswordEncoder / StandardPasswordEncoder stretch nothing — they apply fast MD5/SHA digests a GPU can race through. A database leak then exposes every account credential verbatim or near-verbatim. Always store via an adaptive KDF with heavy work factors — BCryptPasswordEncoder (strength >= 10) or Argon2PasswordEncoder / Pbkdf2PasswordEncoder / SCryptPasswordEncoder, all from spring-security-crypto — and migrate legacy {noop}/{md5} hashes to a real scheme before shipping. Adaptive encoders, the delegating factory, digest-utility calls, and comment/string-literal reproductions of the weak marker names stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
