@@ -3459,6 +3459,83 @@ def test_javakeysz_adequate_sizes_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R074-javakeysz"], issues
 
 
+def test_jvachttp_cleartext_sinks_flagged():
+    """R075-jvachttp fires when the added line builds a Java network/HTTP
+    call or JNDI binding on a literal cleartext scheme (CWE-319): new
+    URL/URI/URI.create with http:// ws:// ftp://, RestTemplate-family and
+    HttpClient verbs with a cleartext literal URL, WebClient fluent
+    .uri(http://), OkHttp/HttpUrl builders .url(http://)/HttpUrl.parse, and
+    JNDI provider-url configuration or context ctor with ldap://."""
+    src = (
+        'URL u = new URL("http://legacy.example.com/data");\n'
+        'new URL("ws://chat.example.com/socket");\n'
+        'URI u = new URI("http://internal.example.org/v1");\n'
+        'URI.create("http://svc.example.net:8080");\n'
+        'URI.create("ftp://files.example.com/pub");\n'
+        'new URL("HTTP://case.example.com");\n'
+        'restTemplate.getForObject("http://billing.example.com/accounts", String.class);\n'
+        'restTemplate.exchange("http://legacy.example.com/api", HttpMethod.GET, entity, String.class);\n'
+        'client.execute("http://stats.example.com/ping");\n'
+        'httpClient.postForObject("http://pay.example.com/tx", req, Resp.class);\n'
+        'webClient.get().uri("http://analytics.example.com/events").retrieve();\n'
+        'webClient.post().uri("http://ingest.example.com/log").send();\n'
+        'new Request.Builder().url("http://ok.example.com/endpoint").build();\n'
+        'requestBuilder.url("http://old.example.com/v1");\n'
+        'HttpUrl.parse("http://dns.example.com/resolve");\n'
+        'env.put(Context.PROVIDER_URL, "ldap://ldap.example.com:389");\n'
+        'env.put("java.naming.provider.url", "ldap://legacy-ldap.example.com");\n'
+        'new InitialDirContext(props, "ldap://dir.example.com");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R075-jvachttp"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "medium" for i in hits)
+
+
+def test_jvachttp_cleartext_negatives_stay_quiet():
+    """R075-jvachttp stays quiet for TLS-scheme URLs (https/wss/ftps/ldaps),
+    URI-case variations of secure schemes, non-literal URL targets
+    (variables/concatenations — R057's domain), https in HTTP-client verbs,
+    unrelated receivers/statements, and comment/string-literal
+    reproductions."""
+    src = (
+        'URL u = new URL("https://api.example.com/secure");\n'
+        'URI u = new URI("https://accounts.example.com");\n'
+        'URI.create("https://cdn.example.com/x");\n'
+        'URI.create("wss://socket.example.com");\n'
+        'new URL("ftps://secure.example.com");\n'
+        'new URL("HTTPS://UPPER.example.com");\n'
+        'new URL(request.getParameter("u"));\n'
+        'new URL(url);\n'
+        'URI.create(baseEndpoint + "/v1");\n'
+        'restTemplate.getForObject(endpoint + "/users", String.class);\n'
+        'HttpRequest.newBuilder(URI.create("https://req.example.com")).build();\n'
+        'restTemplate.getForObject("https://internal.example.com/api", String.class);\n'
+        'restTemplate.exchange("https://svc.example.com", HttpMethod.GET, e, String.class);\n'
+        'client.execute("SELECT * FROM t");\n'
+        'client.execute(sql, ps);\n'
+        'webClient.get().uri("https://www.example.com/me").retrieve();\n'
+        'new Request.Builder().url("https://ok.example.com/endpoint").build();\n'
+        'requestBuilder.url("https://new.example.com/v1");\n'
+        'HttpUrl.parse("https://dns.example.com/resolve");\n'
+        'env.put(Context.PROVIDER_URL, "ldaps://ldap.example.com:636");\n'
+        'String conn = "ldap://ldap.example.com";\n'
+        'new InitialDirContext(props);\n'
+        'env.put(Context.SECURITY_PRINCIPAL, "cn=admin");\n'
+        'String ldapUrl = props.getProperty("ldap.url");\n'
+        'builder.append("http://x.example.com");\n'
+        'logger.info("http://debug.example.com");\n'
+        'String s = "http://plain.example.com";\n'
+        '// new URL("http://bad.example.com");\n'
+        '// restTemplate.getForObject("http://x.example.com", String.class);\n'
+        '// env.put(Context.PROVIDER_URL, "ldap://ldap.example.com");\n'
+        'String t = "new URL(\\"http://bad.example.com\\");";\n'
+        'String u = "env.put(\\"java.naming.provider.url\\", \\"ldap://x.example.com\\");";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R075-jvachttp"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -3658,6 +3735,7 @@ def test_every_rule_has_test_exposure():
         "R072-javaeval",
         "R073-javaformat",
         "R074-javakeysz",
+        "R075-jvachttp",
     }
     assert exposed <= rids
     uncovered = rids - exposed

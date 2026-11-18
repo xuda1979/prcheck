@@ -2422,6 +2422,76 @@ _RULE_TUPLES = [
         r")",
         "A Java key/crypto size picked below the secure minimum — CWE-326 inadequate encryption strength: RSA/DSA/DH key pairs smaller than 2048 bits (KeyPairGenerator .initialize(512/1024/1536)), symmetric keys smaller than 128 bits (KeyGenerator .init(56/64/80/96/112)), EC curves from the obsolete < 192-bit standard family (new ECGenParameterSpec(\"secp160r1\"/\"secp192r1\"/...) — 160/192-bit ECDLP is solvable with commodity hardware) and Diffie-Hellman primes under 2048 bits (new DHParameterSpec(512, 2): the Logjam attack precomputed the 512-bit tier and 1024-bit needs only large state actor effort) give an attacker a practical factoring/ECDLP/relogging break, so key material or TLS/DH handshakes built on them can be decrypted or forged. Fix: use >= 2048-bit RSA/DSA/DH (or 3072 for higher assurance), >= 128-bit symmetric keys (AES-128/192/256), and current standard curves (secp256r1/384r1/521r1) — or better, let the TLS/library defaults choose parameters; sizes below these bounds should be rejected at configuration review. Adequate sizes and non-literal size variables stay quiet",
     ),
+    (
+        "R075-jvachttp",
+        "security",
+        "medium",
+        "Java network/HTTP client or JNDI configuration built on a cleartext scheme literal (http:///ws:///ftp:// in URL/URI construction or request verbs, ldap:// in provider URLs): new URL/URI.create, RestTemplate/WebClient/HttpClient verbs, OkHttp/HttpUrl builders (CWE-319)",
+        # CWE-319 (Cleartext Transmission of Sensitive Information): a URL
+        # literal that starts with a cleartext scheme at a Java network/
+        # HTTP-client sink hands credentials, cookies or body data to a
+        # passive eavesdropper. R057-ssrf owns request-derived (non-literal)
+        # URL targets; R071-javatls owns TLS-verification-disabled calls; this
+        # rule scans only literal cleartext scheme strings at these sinks:
+        #   BR1  new URL(\"http://...\") / new URI(\"http://...\") /
+        #        URI.create(\"http://...\") with a literal cleartext scheme
+        #        (http, ws, ftp — case-insensitive scheme token, scoped so
+        #        the Java CamelCase receiver stays case-sensitive).
+        #   BR2  Spring RestTemplate-family receivers
+        #        (restTemplate/rest/webClient/httpClient/client) calling
+        #        getForObject/getForEntity/postForEntity/patchForObject/put/
+        #        delete/exchange/execute with a cleartext literal URL; the
+        #        exchange/execute verbs on a bare `client` receiver also
+        #        match JDBC/persistence hands like client.execute(sql) by
+        #        design — those stay quiet because their first argument is
+        #        not a scheme:// literal (\"SELECT \"/sql variable).
+        #   BR3  WebClient fluent chains .get()/.post()/...() .uri(\"http://\")
+        #        — the request-level uri() overload with a cleartext literal.
+        #   BR4  OkHttp/HttpUrl builders: new Request.Builder().url(\"http://\"),
+        #        receiver.url(...) on request builders/connections,
+        #        HttpUrl.parse(\"http://...\").
+        #   BR5  JNDI cleartext LDAP: env.put(Context.PROVIDER_URL ...) /
+        #        env.put(\"java.naming.provider.url\", \"ldap://...\") /
+        #        env.put(\"java.naming.security.authentication\", \"ldap://...\")
+        #        and new InitialDirContext(new InitialContext(...)) ctors
+        #        with a literal ldap:// value — LDAP binds/greets in clear.
+        # Every branch carries the multi-part comment/literal boundary and a
+        # literal-scheme contract: https/wss/ftps/ldaps (TLS) stay quiet,
+        # non-literal targets (variables, concatenations, request headers —
+        # R057/R060's domain) and unrelated receivers stay quiet, and
+        # comment/string-literal reproductions die on the boundary. Java
+        # sources are case-sensitive CamelCase, so the (?i:...) translation
+        # is scoped to the scheme token only (R053-R074 convention);
+        # single-line contract.
+        r"(?:"
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:new\s+(?:URL|URI)|URI\s*\.\s*create)\s*\(\s*['\"]"
+        r"(?i:http|ws|ftp)://)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:restTemplate|rest|webClient|httpClient|client)\s*\.\s*"
+        r"(?:getForObject|getForEntity|postForObject|postForEntity|"
+        r"patchForObject|put|delete|exchange|execute)\s*\(\s*['\"]"
+        r"(?i:http|ws|ftp)://)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bwebClient\s*\.\s*(?:get|post|put|delete|patch)\s*\(\s*\)"
+        r"\s*\.\s*uri\s*\(\s*['\"]"
+        r"(?i:http|ws|ftp)://)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:new\s+Request\s*\.\s*Builder\s*\([^\n]*?\.url|"
+        r"\b(?:reqBuilder|requestBuilder|okHttpRequest|httpConn|connection)"
+        r"\s*\.\s*url|HttpUrl\s*\.\s*parse)\s*\(\s*['\"]"
+        r"(?i:http|ws|ftp)://)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b\w+\.put\s*\(\s*(?:Context\.PROVIDER_URL|['\"](?:"
+        r"java\.naming\.provider\.url|java\.naming\.security\.authentication)"
+        r"['\"])\s*,\s*['\"]"
+        r"(?i:ldap)://)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+(?:InitialDirContext|InitialContext)\s*\([^\n]*?['\"]"
+        r"(?i:ldap)://)"
+        r")",
+        "A Java network/HTTP call or JNDI binding pinned to a cleartext scheme literal — CWE-319 cleartext transmission: new URL/URI or URI.create with \"http://\" (or ws:///ftp://), a RestTemplate/WebClient/HttpClient request verb handed a cleartext literal URL, an OkHttp/HttpUrl builder .url(\"http://\")/HttpUrl.parse, or an LDAP provider configured with \"ldap://\" (Context.PROVIDER_URL / java.naming.provider.url / InitialDirContext ctor) sends the payload, cookies or LDAP bind credentials in the clear, so any attacker on the path can read or tamper with it. Fix: use the TLS variants — https:// / wss:// / ftps:// and ldaps:// (or STARTTLS for LDAP), and load URLs from config/request only through vetted channels (a request-derived target is R057's domain); cleartext schemes should be rejected at configuration review. TLS-scheme or non-literal targets and unrelated receivers stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

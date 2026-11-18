@@ -568,6 +568,23 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   symmetric keys, current standard curves (`secp256r1/384r1/521r1`) or
   library defaults; adequate sizes, non-literal size variables, bare
   declarations and non-config `init`/`initialize` receivers stay quiet).
+  Java network/HTTP client or JNDI configuration built on a cleartext
+  scheme literal — CWE-319: `new URL("http://..")`/`new URI(..)`/
+  `URI.create(..)`, Spring `restTemplate|rest|webClient|httpClient|client`
+  verbs (`getForObject|exchange|execute|..`) with a literal `http://`
+  argument, WebClient fluent `.get().uri("http://..")`, OkHttp/HttpUrl
+  builders (`new Request.Builder().url("http://..")`,
+  `requestBuilder.url(..)`, `HttpUrl.parse`), and JNDI cleartext LDAP
+  (`env.put(Context.PROVIDER_URL, "ldap://..")` / `"java.naming.provider.
+  url"` or an `InitialDirContext`/`InitialContext` ctor with a literal
+  `ldap://` value) — ws:// / ftp:// literals are covered too, e.g. the
+  scheme token is case-insensitive, and the request/body/cookies or LDAP
+  bind credentials cross the wire in clear for anyone on the path to read
+  or tamper with; fix by using the TLS variants (`https://`/`wss://`/
+  `ftps://` and `ldaps://` or STARTTLS) and loading targets from
+  configuration through vetted channels (request-derived targets are
+  R057's domain); TLS-scheme or non-literal targets, unrelated receivers
+  and comment/string-literal reproductions stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
