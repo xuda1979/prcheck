@@ -656,3 +656,14 @@ Not in this MVP: deep static analysis (module 03), a fully hosted GitHub App /
 tenant dashboard (phase P3 is provided only as a minimal webhook bridge),
 multi-service orchestration. Optional LLM summarizer is a stub (mock) and
 stays off by default.
+
+## License
+
+Dual-licensed: the source code is released under the
+**GNU Affero General Public License v3.0 (AGPL-3.0)** — see
+[`LICENSE`](LICENSE). Any commercial or profit-making use, or use in a
+product or service sold or licensed to others, requires a separate
+written commercial authorization agreement with the copyright holder — see
+[`COMMERCIAL-LICENSE.md`](COMMERCIAL-LICENSE.md).
+
+Copyright (c) 2026 许达 (Xu Da) / 中国移动研究院 (China Mobile Research Institute).
