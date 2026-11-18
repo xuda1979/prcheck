@@ -3798,6 +3798,56 @@ def test_javacors_wildcard_origin_negatives_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R079-javacors"], issues
 
 
+def test_javajwt_unsecured_or_none_sinks_flagged():
+    """R080-javajwt fires when the added line makes a Java JWT parser accept
+    unsigned or attacker-chosen tokens (CWE-347 improper verification of
+    cryptographic signature): jjwt's parseUnsecuredContent / unsecured().
+    allowUnsecured() skip signature verification, a legacy
+    setSigningKey(null | \"\" | new byte[0]) can never verify a real token,
+    SignatureAlgorithm.NONE / JWSAlgorithm.NONE admit the 'none' algorithm,
+    and Spring Security's JwtDecoders.none() decodes unsigned tokens."""
+    src = (
+        'Jwts.parser().parseUnsecuredContent(token)\n'
+        'Jwts.parser().unsecured().allowUnsecured().build().parse(token)\n'
+        'Jwts.parser().setSigningKey(null)\n'
+        'Jwts.parser().setSigningKey("")\n'
+        'Jwts.parser().setSigningKey(new byte[0])\n'
+        'Jwts.builder().signWith(SignatureAlgorithm.NONE, insecureKey)\n'
+        'new JWSVerificationKeySelector(JWSAlgorithm.NONE, jwkSource)\n'
+        'return JwtDecoders.none();\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R080-javajwt"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javajwt_unsecured_or_none_negatives_stay_quiet():
+    """R080-javajwt stays quiet for parsers that actually verify: jjwt 0.12+
+    verifyWith(secretKey).build().parseSignedClaims chains, legacy
+    setSigningKey fed a runtime key, issuer-based decoders
+    (fromIssuerLocation/fromOidcIssuerLocation), strong-algorithm constants
+    (HS256/RS256), signing-only code, and comment/string-literal
+    reproductions."""
+    src = (
+        'Jwts.parser().verifyWith(secretKey).build().parseSignedClaims(token)\n'
+        'Jwts.parser().setSigningKey(signingKey).build().parseClaimsJws(token)\n'
+        'parserBuilder.setSigningKey(hmacSecret.getEncoded())\n'
+        'JwtDecoders.fromIssuerLocation("https://auth.example.com/issuer")\n'
+        'JwtDecoders.fromOidcIssuerLocation(ISSUER_URL)\n'
+        'Jwts.builder().signWith(SignatureAlgorithm.HS256, secretKey)\n'
+        'new JWSVerificationKeySelector(JWSAlgorithm.RS256, jwkSource)\n'
+        'Jwts.builder().signWith(jwk.toPublicJWK()).compact()\n'
+        '// setSigningKey(null)\n'
+        '// Jwts.parser().verifyWith(secretKey)\n'
+        'String s = "parseUnsecuredContent(token)";\n'
+        'String s = "setSigningKey(null)";\n'
+        'String s = "JwtDecoders.none()";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R080-javajwt"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4002,6 +4052,7 @@ def test_every_rule_has_test_exposure():
         "R077-javajson",
         "R078-javatpl",
         "R079-javacors",
+        "R080-javajwt",
     }
     assert exposed <= rids
     uncovered = rids - exposed

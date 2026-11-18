@@ -2762,6 +2762,43 @@ _RULE_TUPLES = [
         r"[\"']Access-Control-Allow-Origin[\"']\s*,\s*[\"']\*[\"'])",
         "A Java CORS policy or header allows any origin — CWE-942 permissive cross-domain policy: @CrossOrigin(origins = \"*\"), registry.addMapping(\"/**\").allowedOrigins(\"*\"), config.setAllowedOrigins(Collections.singletonList(\"*\")), Jetty addAllowedOrigin(\"*\") or response.setHeader(\"Access-Control-Allow-Origin\", \"*\") let an attacker-hosted page fetch authenticated responses, turning the API into a cross-origin CSRF/exfiltration channel (and a wildcard alongside allowCredentials is silently invalid). Configure an explicit allow-list of trusted origins instead, echo the request's Origin only after verification, and never combine permissive origins with credentials. Explicit-origin allow-lists, constant origins, getters, unrelated header writes and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R080-javajwt",
+        "security",
+        "high",
+        "Java JWT parser accepts unsigned/alg=none tokens or verifies with an impossible key (jjwt/Nimbus/Spring) — CWE-347",
+        # CWE-347 (Improper Verification of Cryptographic Signature): a JWT is
+        # only as strong as the parser's signature verification, so sinks that
+        # disable or weaken it let an attacker forge admin/session tokens.
+        # R024-jwt already covers the Python jwt library; this rule pins the
+        # common Java stacks (jjwt, Nimbus JOSE, Spring Security).  Branches
+        # (Java sources, case-sensitive, single-line):
+        #   BR1  jjwt 0.12+ explicit unsecured parsing:
+        #        Jwts.parser().parseUnsecuredContent(...) and the
+        #        UnsecuredJwtParser escape hatch .unsecured().allowUnsecured(...)
+        #        skip signature verification entirely.
+        #   BR2  Legacy jjwt parsers told to verify with a key that cannot
+        #        work: setSigningKey(null | "" | new byte[0]).
+        #   BR3  The "none" algorithm constant, the crux of alg-confusion /
+        #        unsigned tokens: SignatureAlgorithm.NONE (jjwt) and
+        #        JWSAlgorithm.NONE (Nimbus) inside signWith/selectors/configs.
+        #   BR4  Spring Security's decoder for unsigned tokens: JwtDecoders.none().
+        # Every branch wears the multi-part comment/literal boundary.  Verified
+        # chains (verifyWith(...).build().parseSignedClaims, setSigningKey with a
+        # runtime key), issuer decoders (fromIssuerLocation/fromOidcIssuerLocation),
+        # strong-algorithm constants (HS256/RS256), signing-only code, and
+        # comment/string-literal reproductions stay quiet.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"(?:parseUnsecuredContent|allowUnsecured)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\.setSigningKey\s*\(\s*(?:null\b|[\"'][\"']|(?:new\s+)?byte\s*\[\s*0\s*\]))"
+
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"(?:JWSAlgorithm|SignatureAlgorithm)\s*[.]\s*NONE\b)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"JwtDecoders\s*[.]\s*none\s*\()",
+        "A Java JWT parser accepts unsigned or attacker-chosen tokens — CWE-347 improper verification of cryptographic signature: jjwt's Jwts.parser().parseUnsecuredContent(...) / .unsecured().allowUnsecured(...) skip verification entirely, a legacy Jwts.parser().setSigningKey(null | \"\" | new byte[0]) asks a key-based parser to verify with a key that cannot exist, SignatureAlgorithm.NONE / JWSAlgorithm.NONE admit the 'none'/unsigned algorithm (alg-confusion), and JwtDecoders.none() decodes unsigned tokens. A forged admin token for any of these is then trusted as genuine. Always verify with a strong key from a secret store (jjwt 0.12+ .verifyWith(SecretKey).build().parseSignedClaims, legacy setSigningKey(runtimeKey)), reject the 'none' algorithm (jjwt 0.12 Configuration rejects it by default; keep a strict algorithm allow-list for Nimbus JWSVerificationKeySelector), and decode only issuer-verified signed tokens (JwtDecoders.fromIssuerLocation(...)). Verified chains with runtime keys, issuer-based decoders, strong-algorithm constants, signing-only code and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
