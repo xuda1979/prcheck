@@ -3929,6 +3929,49 @@ def test_javasecret_hardcoded_key_negatives_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R082-javasecret"], issues
 
 
+def test_javaopen_response_body_echo_flagged():
+    """R083-javaopen fires when the added line writes client-controlled input
+    back into the HTTP response through a sink the declared writer rule does
+    not cover (CWE-116 improper encoding/escaping of output): the raw byte
+    channel response.getOutputStream().write(...) and Spring @ResponseBody /
+    ResponseEntity bodies built directly from request accessors."""
+    src = (
+        'response.getOutputStream().write(request.getParameter("q").getBytes());\n'
+        'response.getOutputStream().write(req.getHeader("X-Raw").getBytes());\n'
+        'response.getOutputStream().write(("id=" + paramId).getBytes());\n'
+        '@ResponseBody String raw(HttpServletRequest request) { return request.getParameter("name"); }\n'
+        'new ResponseEntity<byte[]>(req.getParameter("blob").getBytes(), HttpStatus.OK)\n'
+        'return ResponseEntity.ok(request.getHeader("callback"));\n'
+        'return ResponseEntity.badRequest(req.getParameter("error"));\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R083-javaopen"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaopen_response_body_echo_negatives_stay_quiet():
+    """R083-javaopen stays quiet when the response body is built from
+    server-side data — literals, constants, method results, files, empty
+    writes, status/content-type setup — and for comment/string-literal
+    reproductions: no unsanitized request echo."""
+    src = (
+        'response.setContentType("application/pdf");\n'
+        'response.getOutputStream().write(pdfBytes);\n'
+        'response.getOutputStream().write(staticContent(CONFIG_PATH));\n'
+        'response.getOutputStream().write(new byte[0]);\n'
+        '@ResponseBody String ok() { return "<h1>Welcome</h1>"; }\n'
+        '@ResponseBody List<String> names() { return userService.allNames(); }\n'
+        'return ResponseEntity.ok(assetLoader.load("logo.png"));\n'
+        'new ResponseEntity<String>("created", HttpStatus.OK)\n'
+        'String tpl = "response.getOutputStream().write(request.getParameter(\\"q\\"))";\n'
+        '// ResponseEntity.ok(request.getParameter("cb"))\n'
+        'return ResponseEntity.ok(req);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R083-javaopen"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4136,6 +4179,7 @@ def test_every_rule_has_test_exposure():
         "R080-javajwt",
         "R081-javapw",
         "R082-javasecret",
+        "R083-javaopen",
     }
     assert exposed <= rids
     uncovered = rids - exposed
