@@ -2812,6 +2812,23 @@ _RULE_TUPLES = [
         r"new\s+(?:MessageDigestPasswordEncoder|LdapShaPasswordEncoder|StandardPasswordEncoder)\s*\()",
         "A Java password store is coupled to a plaintext/no-op or weak non-adaptive hashing scheme — CWE-916 insufficient computational effort in password hashing: Spring Security's NoOpPasswordEncoder.getInstance() performs no hashing at all (the credential is kept verbatim), a stored value carrying the {noop} delegating prefix is treated as plaintext (DelegatingPasswordEncoder migration markers must never reach a live store), and the deprecated MessageDigestPasswordEncoder / LdapShaPasswordEncoder / StandardPasswordEncoder stretch nothing — they apply fast MD5/SHA digests a GPU can race through. A database leak then exposes every account credential verbatim or near-verbatim. Always store via an adaptive KDF with heavy work factors — BCryptPasswordEncoder (strength >= 10) or Argon2PasswordEncoder / Pbkdf2PasswordEncoder / SCryptPasswordEncoder, all from spring-security-crypto — and migrate legacy {noop}/{md5} hashes to a real scheme before shipping. Adaptive encoders, the delegating factory, digest-utility calls, and comment/string-literal reproductions of the weak marker names stay quiet",
     ),
+    (
+        "R082-javasecret",
+        "security",
+        "high",
+        "Java derives a crypto/JWT key from a hardcoded string literal (SecretKeySpec / PBEKeySpec / jjwt Keys.hmacShaKeyFor / signWith / setSigningKey) — CWE-321",
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"new\s+SecretKeySpec\s*\(\s*[\"'][^\"']{4,}[\"'])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"Keys\s*[.]\s*hmacShaKeyFor\s*\(\s*[\"'][^\"']{4,}[\"'])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"new\s+PBEKeySpec\s*\(\s*[\"'][^\"']+[\"'])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"signWith\s*\(\s*(?:SignatureAlgorithm|JWSAlgorithm)\s*[.]\s*HS\d{3}\s*,\s*[\"'][^\"']{4,}[\"'])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"setSigningKey\s*\(\s*[\"'][^\"']{4,}[\"'])",
+        "A Java program derives a cryptographic or JWT signing key from a hardcoded string literal — CWE-321 use of a hard-coded cryptographic key: new SecretKeySpec(\"…\", \"AES\") bakes an AES/MAC key, jjwt's Keys.hmacShaKeyFor(\"…\") / Jwts.builder().signWith(SignatureAlgorithm.HS256, \"…\") bake a symmetric signing secret, the legacy Jwts.parser().setSigningKey(\"…\") feeds the same literal into token verification, and new PBEKeySpec(\"…\", salt, n) turns a constant password into a derived key. Anyone who can read the repo (or decompile the artifact) then silently owns every key in the deployment — forge JWTs, decrypt intercepted traffic, impersonate users. Load key material from a secret manager / env var instead (new SecretKeySpec(base64Decoder(secretEnvVar), \"AES\"), Keys.hmacShaKeyFor(vaultBytes), runtime setSigningKey(vaultKey)) and commit only test-only placeholders. Key bytes from variables/config/env, runtime passwords, KDF-derived bytes, and comment/string-literal reproductions of these construction forms stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

@@ -3891,6 +3891,44 @@ def test_javapw_plaintext_or_weak_scheme_negatives_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R081-javapw"], issues
 
 
+def test_javasecret_hardcoded_key_flagged():
+    """R082-javasecret fires when the added line derives a Java crypto or JWT
+    key directly from a hardcoded string literal (CWE-321 use of a hard-coded
+    cryptographic key): new SecretKeySpec(\"...\"), jjwt Keys.hmacShaKeyFor /
+    signWith(alg, \"...\"), legacy setSigningKey(\"...\"), and
+    PBEKeySpec(\"...\") password-derived keys."""
+    src = (
+        'SecretKey key = new SecretKeySpec("0123456789abcdef", "AES");\n'
+        'new SecretKeySpec("changeit", "DES")\n'
+        'Keys.hmacShaKeyFor("my-statically-baked-secret".getBytes())\n'
+        'Jwts.builder().signWith(SignatureAlgorithm.HS256, "maybe-token-secret-yes")\n'
+        'parser.setSigningKey("legacy-literal-signing-key")\n'
+        'new PBEKeySpec("pencil-and-paper-password", salt1, 1000)\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R082-javasecret"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javasecret_hardcoded_key_negatives_stay_quiet():
+    """R082-javasecret stays quiet when key material comes from variables,
+    config/env, runtime input, or KDF derivation."""
+    src = (
+        'SecretKey key = new SecretKeySpec(keyBytes, "AES");\n'
+        'new SecretKeySpec(secretEnv.getEncoded(), algorithm)\n'
+        'Keys.hmacShaKeyFor(vaultSecret.getBytes(StandardCharsets.UTF_8))\n'
+        'Jwts.builder().signWith(SignatureAlgorithm.RS256, privateKey)\n'
+        'parser.setSigningKey(signingKey)\n'
+        'new PBEKeySpec(password.toCharArray(), salt, iterations)\n'
+        'PBEKeySpec spec = new PBEKeySpec(new char[0]);\n'
+        'String s = "new SecretKeySpec(\\"literal\\", \\"AES\\")";\n'
+        '// Keys.hmacShaKeyFor("baked-in")\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R082-javasecret"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4097,6 +4135,7 @@ def test_every_rule_has_test_exposure():
         "R079-javacors",
         "R080-javajwt",
         "R081-javapw",
+        "R082-javasecret",
     }
     assert exposed <= rids
     uncovered = rids - exposed
