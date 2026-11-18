@@ -3740,6 +3740,64 @@ def test_javatpl_template_negatives_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R078-javatpl"], issues
 
 
+def test_javacors_wildcard_origin_sinks_flagged():
+    """R079-javacors fires when the added line sets a CORS policy or
+    Access-Control-Allow-Origin header to the '*' wildcard origin (CWE-942
+    permissive cross-domain policy): Spring's @CrossOrigin annotation, the
+    CorsRegistry addMapping(...).allowedOrigins/allowedOriginPatterns chain,
+    CorsConfiguration setAllowedOrigins/setAllowedOriginPatterns fed through
+    singleton/singletonList/asList/List.of/Set.of, Jetty CorsFilter's
+    addAllowedOrigin, and a hand-written
+    response.set/addHeader("Access-Control-Allow-Origin", "*")."""
+    src = (
+        '@CrossOrigin(origins = "*")\n'
+        '@CrossOrigin(origins="*")\n'
+        '@CrossOrigin(origins = {"*"})\n'
+        'registry.addMapping("/**").allowedOrigins("*")\n'
+        'registry.addMapping("/api/**").allowedOriginPatterns("*")\n'
+        'config.setAllowedOrigins(Collections.singletonList("*"))\n'
+        'config.setAllowedOriginPatterns(Arrays.asList("*"))\n'
+        'config.setAllowedOrigins(List.of("*"))\n'
+        'config.setAllowedOrigins(Set.of("*"))\n'
+        'config.setAllowedOrigins(Collections.singleton("*"))\n'
+        'corsConfig.addAllowedOrigin("*")\n'
+        'cfgs.addAllowedOrigin("*");\n'
+        'response.setHeader("Access-Control-Allow-Origin", "*")\n'
+        'resp.addHeader("Access-Control-Allow-Origin", "*")\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R079-javacors"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javacors_wildcard_origin_negatives_stay_quiet():
+    """R079-javacors stays quiet for explicit-origin allow-lists in every sink
+    form, constants/request-derived origins, the wildcard used for methods or
+    headers (allowedMethods/allowedHeaders/addAllowedHeader/addAllowedMethod
+    are not origins), getters and setAllowCredentials, unrelated header
+    writes, and comment/string-literal reproductions."""
+    src = (
+        '@CrossOrigin(origins = "https://app.example.com")\n'
+        '@CrossOrigin(origins = {"https://a.com", "https://b.com"})\n'
+        'registry.addMapping("/**").allowedOrigins("https://app.example.com")\n'
+        'registry.addMapping("/**").allowedMethods("*")\n'
+        'registry.addMapping("/**").allowedHeaders("*")\n'
+        'config.setAllowedOrigins(Collections.singletonList("https://app.example.com"))\n'
+        'config.setAllowedOrigins(ALLOWED_ORIGINS)\n'
+        'config.getAllowedOrigins().forEach(System.out::println)\n'
+        'config.setAllowCredentials(true)\n'
+        'corsConfig.addAllowedHeader("*")\n'
+        'corsConfig.addAllowedMethod("*")\n'
+        'response.setHeader("Content-Type", "application/json")\n'
+        'response.setHeader("Access-Control-Allow-Origin", origin)\n'
+        '// config.setAllowedOrigins(Collections.singletonList("*"))\n'
+        'String s = "registry.addMapping(\\"/**\\").allowedOrigins(\\"*\\")";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R079-javacors"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -3943,6 +4001,7 @@ def test_every_rule_has_test_exposure():
         "R076-javaredos",
         "R077-javajson",
         "R078-javatpl",
+        "R079-javacors",
     }
     assert exposed <= rids
     uncovered = rids - exposed

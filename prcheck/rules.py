@@ -2718,6 +2718,50 @@ _RULE_TUPLES = [
         r"\))",
         "A Java server-side template engine is fed a non-literal template source or name — CWE-1336 server-side template injection: Velocity.evaluate (4th arg), Freemarker new Template(name, src, cfg) / new StringReader(src) / configuration.getTemplate(name), and TemplateEngine.process(template, context) treat the markup string as code, so a request-influenced template can run Velocity directives, Freemarker ${...} interpolations or Thymeleaf __${...}__::.x preprocessing for remote code execution. Keep template markup in reviewed server-side files/constants only, never build it from request data; if user content must appear in a rendered page, pass it as a data-model value (Freemarker ${user!} / Velocity $user output-escaping) so it is data, not syntax. Literal templates, SCREAMING_SNAKE sources/names, the safe template.process(data, out) render step, unrelated receivers and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R079-javacors",
+        "security",
+        "high",
+        "Java CORS configuration or header set to the '*' wildcard origin (Spring @CrossOrigin / CorsRegistry / CorsConfiguration / Jetty CorsFilter) — CWE-942",
+        # CWE-942 (Permissive Cross-domain Policy with Untrusted Domains): the
+        # Access-Control-Allow-Origin wildcard lets ANY origin read the
+        # response, so authenticated data is exposed to a script running on
+        # an attacker page (and breaks cookies entirely when combined with
+        # allowCredentials).  The generic R007-cors only notices the
+        # Access-Control-Allow-Origin token in any context; this rule
+        # pinpoints the actual permissive Java sinks.  Branches (Java
+        # sources, case-sensitive, single-line):
+        #   BR1  Spring @CrossOrigin annotation (keyword/value/array form)
+        #        with a "*" origin/pattern.
+        #   BR2  CorsRegistry chain: registry.addMapping("/**").
+        #        allowedOrigins("*") / allowedOriginPatterns("*").
+        #   BR3  CorsConfiguration: config.setAllowedOrigins(...) /
+        #        setAllowedOriginPatterns(...) fed a "*" through
+        #        singleton/singletonList/asList/List.of/Set.of.
+        #   BR4  addAllowedOrigin("*") (Jetty CorsFilter configuration
+        #        store, org.apache.catalina quirks).
+        #   BR5  response.set/addHeader("Access-Control-Allow-Origin", "*").
+        # Every branch wears the multi-part comment/literal boundary.  An
+        # explicit origin allow-list ("https://app.example.com", a
+        # SCREAMING_SNAKE constant), the getter getCorsOrigins()/others,
+        # unrelated setHeader calls, and comment/string-literal
+        # reproductions stay quiet.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"@CrossOrigin\s*\([^)\n]*[\"']\*[\"'])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[a-z_]\w*\s*\.\s*(?:addMapping\s*\([^)\n]*\)\s*\.\s*)?"
+        r"(?:allowedOrigins|allowedOriginPatterns)\s*\(\s*[\"']\*[\"'])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[a-z_]\w*\s*\.\s*(?:setAllowedOrigins|setAllowedOriginPatterns)"
+        r"\s*\(\s*(?:(?:Collections|Arrays)\s*\.\s*|(?:List|Set)\s*\.\s*)?"
+        r"(?:singletonList|asList|of|singleton)\s*\(\s*[\"']\*[\"'])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[a-z_]\w*\s*\.\s*addAllowedOrigin\s*\(\s*[\"']\*[\"'])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:response|resp)\w*\s*\.\s*(?:set|add)Header\s*\(\s*"
+        r"[\"']Access-Control-Allow-Origin[\"']\s*,\s*[\"']\*[\"'])",
+        "A Java CORS policy or header allows any origin — CWE-942 permissive cross-domain policy: @CrossOrigin(origins = \"*\"), registry.addMapping(\"/**\").allowedOrigins(\"*\"), config.setAllowedOrigins(Collections.singletonList(\"*\")), Jetty addAllowedOrigin(\"*\") or response.setHeader(\"Access-Control-Allow-Origin\", \"*\") let an attacker-hosted page fetch authenticated responses, turning the API into a cross-origin CSRF/exfiltration channel (and a wildcard alongside allowCredentials is silently invalid). Configure an explicit allow-list of trusted origins instead, echo the request's Origin only after verification, and never combine permissive origins with credentials. Explicit-origin allow-lists, constant origins, getters, unrelated header writes and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
