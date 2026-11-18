@@ -554,6 +554,20 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   compile-time literal and passing runtime values only as arguments;
   literal formats with non-literal arguments (`String.format("%s", name)`)
   and `Locale`-overload calls with a literal format stay quiet).
+  Java key/crypto parameters sized below the secure minimum — CWE-326:
+  `KeyPairGenerator...initialize(512/1024/1536)` inline chains and staged
+  generators (`kpg|keyPairGenerator|pairGen|rsaKeyGen|dsaKeyGen
+  .initialize(< 2048)`), `KeyGenerator...init(56/64/80/96/112)` chains and
+  staged `kg|keyGenerator|keygen|symKeyGen .init(< 128)`, obsolete sub-192-
+  bit EC curves (`new ECGenParameterSpec("secp160r1"/"secp192r1"/
+  "prime192v1"/..)`), and small DH primes (`new DHParameterSpec(512, 2)`,
+  the Logjam precomputation tier) — RSA below 2048 bits is factorable with
+  modern resources, 160/192-bit ECDLP is solvable with commodity hardware,
+  and sub-2048-bit DH is reloggable, so keys/handshakes built on them can
+  be decrypted or forged; fix by using >= 2048-bit RSA/DSA/DH, >= 128-bit
+  symmetric keys, current standard curves (`secp256r1/384r1/521r1`) or
+  library defaults; adequate sizes, non-literal size variables, bare
+  declarations and non-config `init`/`initialize` receivers stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

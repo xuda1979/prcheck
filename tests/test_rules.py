@@ -3390,6 +3390,75 @@ def test_javaformat_literal_format_string_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R073-javaformat"], issues
 
 
+def test_javakeysz_weak_sizes_flagged():
+    """R074-javakeysz fires when the added line configures a Java key/crypto
+    parameter below the secure minimum (CWE-326): KeyPairGenerator inline
+    chain and staged receivers .initialize(< 2048), KeyGenerator inline
+    chain and staged receivers .init(< 128), the obsolete < 192-bit EC
+    curve family (new ECGenParameterSpec(...)), and a small DH prime
+    (new DHParameterSpec(...))."""
+    src = (
+        'KeyPairGenerator.getInstance("RSA").initialize(1024);\n'
+        'KeyPairGenerator.getInstance("DSA").initialize(512);\n'
+        'kpg.initialize(512);\n'
+        'keyPairGenerator.initialize(1024);\n'
+        'pairGen.initialize(768, new SecureRandom());\n'
+        'rsaKeyGen.initialize(1536);\n'
+        'KeyGenerator.getInstance("AES").init(56);\n'
+        'KeyGenerator.getInstance("AES").init(112);\n'
+        'kg.init(64);\n'
+        'keyGenerator.init(96);\n'
+        'symKeyGen.init(80);\n'
+        'new ECGenParameterSpec("secp160r1");\n'
+        'ECGenParameterSpec curve = new ECGenParameterSpec("secp192r1");\n'
+        'new ECGenParameterSpec("prime192v1");\n'
+        'new DHParameterSpec(1024, 2);\n'
+        'new DHParameterSpec(512, 2);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R074-javakeysz"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javakeysz_adequate_sizes_stay_quiet():
+    """R074-javakeysz stays quiet when the size is adequate (>= 2048-bit
+    keygen, >= 128-bit symmetric, current EC curves, 2048-bit DH), the size
+    is a non-literal variable, the text is staging/declaration/non-config,
+    the receiver is unrelated, or it is a comment/string-literal
+    reproduction."""
+    src = (
+        'KeyPairGenerator.getInstance("RSA").initialize(2048);\n'
+        'KeyPairGenerator.getInstance("RSA").initialize(4096);\n'
+        'kpg.initialize(2048);\n'
+        'kpg.initialize(2048, new SecureRandom());\n'
+        'keyPairGenerator.initialize(3072);\n'
+        'KeyGenerator.getInstance("AES").init(128);\n'
+        'KeyGenerator.getInstance("AES").init(256);\n'
+        'kg.init(192);\n'
+        'new ECGenParameterSpec("secp256r1");\n'
+        'new ECGenParameterSpec("secp384r1");\n'
+        'new ECGenParameterSpec("secp521r1");\n'
+        'new ECGenParameterSpec("secp224r1");\n'
+        'new DHParameterSpec(2048, 2);\n'
+        'KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");\n'
+        'KeyGenerator kg = KeyGenerator.getInstance("HmacSHA256");\n'
+        'kpg.initialize(new SecureRandom());\n'
+        'kpg.initialize(sizeVariable);\n'
+        'kpg.initialize(fixedKeySize);\n'
+        'Integer.parseInt("1024");\n'
+        'kg.mass = 56;\n'
+        'config.init(1512, mode);\n'
+        'registry.initialize(2024, seed);\n'
+        '// KeyPairGenerator.getInstance("RSA").initialize(1024);\n'
+        '// new ECGenParameterSpec("secp160r1");\n'
+        'String s = "KeyPairGenerator.getInstance(\\"RSA\\").initialize(1024);";\n'
+        'String t = "new ECGenParameterSpec(\\"secp160r1\\");";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R074-javakeysz"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -3588,6 +3657,7 @@ def test_every_rule_has_test_exposure():
         "R071-javatls",
         "R072-javaeval",
         "R073-javaformat",
+        "R074-javakeysz",
     }
     assert exposed <= rids
     uncovered = rids - exposed

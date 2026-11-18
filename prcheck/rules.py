@@ -2356,6 +2356,72 @@ _RULE_TUPLES = [
         r")",
         "A format string built from request data lets an attacker control the %-specifiers interpreted by String.format/printf: %s/%h/%x read whatever objects the code passes as arguments and a mismatched specifier kills the request with IllegalFormatException, so a format injected via request.getParameter/headers leaks argument data (credentials, tokens, PII) and denies service — CWE-134 externally-controlled format string. Fix: keep the format string a fixed compile-time literal (a \"...\" constant) and pass only runtime VALUES as arguments so input never reaches the format grammar; if a dynamic layout is truly unavoidable, parse the input against a fixed whitelist of specifiers before formatting and never let %-marking characters from the request reach the format position. Literal formats with variable arguments (String.format(\"%s\", name)) are unaffected and stay quiet",
     ),
+    (
+        "R074-javakeysz",
+        "security",
+        "high",
+        "Java key/crypto parameters sized below the minimum secure threshold (RSA/DSA/DH keygen < 2048 bits, symmetric keygen < 128 bits, EC curve from the < 192-bit legacy set, small DH prime): KeyPairGenerator.initialize(n), KeyGenerator.init(n), ECGenParameterSpec / DHParameterSpec (CWE-326)",
+        # CWE-326 (Inadequate Encryption Strength): JCA key/parameter sizes
+        # chosen below the minimum that provides meaningful security.  The
+        # scan is over a key/spec configuration verb, not an algorithm name
+        # (R066-javacrypto owns weak algorithm selection): a numeric size
+        # argument or explicit weak EC curve name is flagged:
+        #   BR1  KeyPairGenerator.getInstance("RSA").initialize(1024) —
+        #        inline chain with a < 2048-bit size (512/640/768/896/1024/
+        #        1280/1536); RSA below 2048 is factorable with modern
+        #        resources and 1024/512 are officially deprecated.
+        #   BR2  staged keypair-generator receivers (kpg/keyPairGenerator/
+        #        keyPairGen/keypairGenerator/pairGen/kpGen/rsaKeyGen/
+        #        dsaKeyGen) .initialize(< 2048) — the common
+        #        KeyPairGenerator kpg = ...; kpg.initialize(1024); split.
+        #   BR3  KeyGenerator.getInstance("AES").init(56) — inline chain
+        #        with a < 128-bit symmetric key size (56/64/80/96/112:
+        #        DES-era 56, RC4-era 64-128, 80-bit WEP).
+        #   BR4  staged key-generator receivers (kg/keyGenerator/keygen/
+        #        symKeyGen) .init(< 128).
+        #   BR5  new ECGenParameterSpec("secp160r1"/"secp192r1"/.../12X)
+        #        — the standard curves below 192 bits (secp160r1/k1,
+        #        secp192r1/k1, prime192v1/v2/v3, sect163r1/k1/r2); the
+        #        constructor is the configuration form (a bare class-name
+        #        token without `new` cannot be a config, and making `new`
+        #        mandatory anchors the match on `n` so the multi-part
+        #        boundary kills comment/string-literal reproductions);
+        #        secp224r1 and secp256r1/384r1/521r1 are adequate and quiet.
+        #   BR6  new DHParameterSpec(512, 2) — Diffie-Hellman prime smaller
+        #        than 2048 bits is vulnerable to the Logjam attack's 512-bit
+        #        precomputation tier (1024-bit needs only nation-state
+        #        effort and is deprecated).
+        # Every branch carries the multi-part comment/literal boundary and a
+        # literal-size/name contract: a non-literal size argument
+        # (kpg.initialize(variable)), an adequate size (2048/3072/4096,
+        # 128/192/256), a non-config receiver hit on init/initialize
+        # (config.init, registry.initialize) and bare declarations stay
+        # quiet. Java sources are case-sensitive CamelCase, so no inline
+        # flag (R053-R073 convention); single-line contract.
+        r"(?:"
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bKeyPairGenerator\s*\.\s*getInstance\s*\([^)\n]*\)\s*\.\s*"
+        r"initialize\s*\(\s*(?:512|640|768|896|1024|1280|1536)\s*(?:,|\)))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:kpg|keyPairGenerator|keyPairGen|keypairGenerator|"
+        r"pairGen|kpGen|rsaKeyGen|dsaKeyGen)\b\s*\.\s*initialize\s*\(\s*"
+        r"(?:512|640|768|896|1024|1280|1536)\s*(?:,|\)))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bKeyGenerator\s*\.\s*getInstance\s*\([^)\n]*\)\s*\.\s*"
+        r"init\s*\(\s*(?:56|64|80|96|112)\s*(?:,|\)))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:kg|keyGenerator|keygen|symKeyGen)\b\s*\.\s*init\s*\(\s*"
+        r"(?:56|64|80|96|112)\s*(?:,|\)))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+ECGenParameterSpec\s*\(\s*['\"]"
+        r"(?:secp160r1|secp160k1|secp192r1|secp192k1|prime192v1|prime192v2|"
+        r"prime192v3|sect163r1|sect163k1|sect163r2)['\"]\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+DHParameterSpec\s*\(\s*(?:512|640|768|896|1024|1280|1536)"
+        r"\s*(?:,|\)))"
+        r")",
+        "A Java key/crypto size picked below the secure minimum — CWE-326 inadequate encryption strength: RSA/DSA/DH key pairs smaller than 2048 bits (KeyPairGenerator .initialize(512/1024/1536)), symmetric keys smaller than 128 bits (KeyGenerator .init(56/64/80/96/112)), EC curves from the obsolete < 192-bit standard family (new ECGenParameterSpec(\"secp160r1\"/\"secp192r1\"/...) — 160/192-bit ECDLP is solvable with commodity hardware) and Diffie-Hellman primes under 2048 bits (new DHParameterSpec(512, 2): the Logjam attack precomputed the 512-bit tier and 1024-bit needs only large state actor effort) give an attacker a practical factoring/ECDLP/relogging break, so key material or TLS/DH handshakes built on them can be decrypted or forged. Fix: use >= 2048-bit RSA/DSA/DH (or 3072 for higher assurance), >= 128-bit symmetric keys (AES-128/192/256), and current standard curves (secp256r1/384r1/521r1) — or better, let the TLS/library defaults choose parameters; sizes below these bounds should be rejected at configuration review. Adequate sizes and non-literal size variables stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
