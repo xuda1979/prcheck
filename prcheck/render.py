@@ -197,7 +197,6 @@ def render_sarif(
                 "tool": {
                     "driver": {
                         "name": tool_name,
-                        "informationUri": "https://github.com/future-org/04-github-prcheck",
                         "rules": rules,
                     }
                 },
