@@ -3683,6 +3683,63 @@ def test_javajson_json_deserialization_negatives_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R077-javajson"], issues
 
 
+def test_javatpl_template_sinks_flagged():
+    """R078-javatpl fires when the added line feeds a non-literal template
+    source or name into a Java server-side template engine (CWE-1336):
+    Velocity/velocityEngine.evaluate (4th-arg template), Freemarker
+    new Template(name, src, cfg) with a variable source or a
+    new StringReader(src) wrapper, configuration.getTemplate(variable name),
+    and TemplateEngine/templateEngine/thymeleafEngine/templateParser.process
+    rendering a variable or concatenated template (Thymeleaf relies on this
+    first-argument signature)."""
+    src = (
+        'velocityEngine.evaluate(ctx, writer, "log", userTemplate);\n'
+        'Velocity.evaluate(ctx, out, "log", request.getParameter("tpl"));\n'
+        'Velocity.evaluate(ctx, out, "log", "Hello " + userName + "!");\n'
+        'new Template("t", userSrc, cfg);\n'
+        'new Template("t", new StringReader(raw), cfg);\n'
+        'new Template("t", new StringReader(request.getParameter("tpl")), cfg);\n'
+        'new Template("t", "hi " + userName, cfg);\n'
+        'cfg.getTemplate(userName);\n'
+        'configuration.getTemplate(request.getParameter("name"));\n'
+        'templateEngine.process(userMarkup, ctx);\n'
+        'new TemplateEngine().process(request.getParameter("tpl"), ctx);\n'
+        'templateEngine.process("index " + userName, ctx);\n'
+        'thymeleafEngine.process(injectedTemplate, context);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R078-javatpl"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javatpl_template_negatives_stay_quiet():
+    """R078-javatpl stays quiet for all-literal templates in every sink form,
+    SCREAMING_SNAKE template names/sources (regarded as constants), the safe
+    render step on an existing Template variable (template.process(model,
+    out)), unrelated receivers (engine.process, setTemplate), an ANTLR
+    StringTemplate construction, and comment/string-literal reproductions."""
+    src = (
+        'Velocity.evaluate(ctx, out, "log", "Hello $name");\n'
+        'new Template("index", "Hi ${user}", cfg);\n'
+        'new Template("index", new StringReader("Hi ${user}"), cfg);\n'
+        'cfg.getTemplate("index.ftl");\n'
+        'configuration.getTemplate(TPL_NAME);\n'
+        'templateEngine.process("index", ctx);\n'
+        'template.process(model, out);\n'
+        'engine.process(template, ctx);\n'
+        'StringTemplate st = new StringTemplate("Hello $name$");\n'
+        'setTemplate(new StringReader("x"));\n'
+        '// velocityEngine.evaluate(ctx, writer, "log", userTemplate);\n'
+        '// cfg.getTemplate(userName);\n'
+        '// templateEngine.process(userMarkup, ctx);\n'
+        'String t = "velocityEngine.evaluate(ctx, writer, \\"log\\", userTemplate);";\n'
+        'String s = "Velocity.evaluate(ctx, out, \\"log\\", \\"Hello $name\\");";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R078-javatpl"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -3885,6 +3942,7 @@ def test_every_rule_has_test_exposure():
         "R075-jvachttp",
         "R076-javaredos",
         "R077-javajson",
+        "R078-javatpl",
     }
     assert exposed <= rids
     uncovered = rids - exposed

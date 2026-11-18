@@ -2648,6 +2648,76 @@ _RULE_TUPLES = [
         r"\s*,\s*(?:new\s+)?TypeReference\b(?!\s*<))",
         "A Java JSON deserializer is fed a non-literal payload — CWE-502 unsafe deserialization: fastjson JSON.parseObject (autoType honors the request-set '@type' property and instantiates attacker-chosen gadget classes, RCE-prone and repeatedly bypassed even with an explicit class) and Jackson ObjectMapper single-argument readValue / readValue(payload, Object.class) / readValue(payload, raw TypeReference), which deserialize into a polymorphic or runtime target type and are the classic Jackson gadget lines (CVE-2017-17485 et al). Untrusted JSON must be rejected at the boundary or parsed with a fixed, safe schema/format; fastjson should never parse request data, and Jackson should parse into a concrete allow-listed type with default typing disabled. Typed-safe Jackson reads (readValue(json, User.class), readValue(json, new TypeReference<List<User>>() {})), JSON.toJSONString, readTree, declarations and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R078-javatpl",
+        "security",
+        "high",
+        "Java server-side template engine fed a non-literal template source/name (Velocity / Freemarker / Thymeleaf)",
+        # CWE-1336 (Improper Neutralization of Special Elements used in a
+        # Template Engine): the Java sibling of R022-ssti (which owns the
+        # Python render_template_string / jinja2 Template sinks).  A
+        # template's markup string is code: when a request-derived value is
+        # concatenated into (or used as) the template text, the user can
+        # inject Velocity directives (#set/$class.inspect()), Freemarker
+        # interpolations (${...} with T()/new()/exec()) or even trigger the
+        # template engine itself (Thymeleaf's __${...}__::.x preprocessing)
+        # for RCE.  Branches (single-line; Java sources case-sensitive, no
+        # inline flag):
+        #   BR1  Velocity/velocityEngine .evaluate(ctx, out, logTag, src)
+        #        — the template is the FOURTH argument, after the context /
+        #        writer / log-tag, so (?:[^,\n]*? ,){3} skips the first three.
+        #   BR2  BR1's literal-prefix + variable concat template.
+        #   BR3  Freemarker new Template(name, src, cfg) — the 2nd argument
+        #        is the markup: a non-literal source directly, or wrapped in
+        #        new StringReader(...) (StreamReader idiom).  Reader/file
+        #        loading stays with other idioms.
+        #   BR4  BR3's concat.  BR5  cfg/configuration/freemarkerConfig
+        #        .getTemplate(non-literal) — a user-derived template NAME
+        #        (Freemarker resolves ${...} in loaded templates; a name an
+        #        attacker can steer is the Thymeleaf-style name vector).
+        #   BR6  TemplateEngine / templateEngine / thymeleafEngine /
+        #        templateParser .process(non-literal[, context]) — Thymeleaf
+        #        and friends render the first argument as markup
+        #        (__${...}__::.x preprocessing RCE).
+        # NLARG (the shared non-literal marker) rejects quoted literals,
+        # new-expressions, null, numbers and SCREAMING_SNAKE constants, and
+        # every branch carries the multi-part comment/literal boundary.  All-
+        # literal templates in every sink form (Velocity.evaluate("Hello
+        # $name"), new Template("index", "Hi ${user}", cfg),
+        # cfg.getTemplate("index.ftl"), templateEngine.process("index",
+        # ctx)), constant names/sources, the safe render step on an existing
+        # Template variable (template.process(model, out)), unrelated
+        # receivers (engine.process, setTemplate(...)), an ANTLR
+        # StringTemplate construction, and comment/string-literal
+        # reproductions stay quiet.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:Velocity|velocityEngine)\s*\.\s*evaluate\s*\((?:[^,\n]*?\s*,\s*){3}"
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:Velocity|velocityEngine)\s*\.\s*evaluate\s*\((?:[^,\n]*?\s*,\s*){3}"
+        r"['\"][^)\n]*?['\"]\s*\+\s*"
+        r"(?!['\" ]|\d|[A-Z][A-Z0-9_]{2,}\b)[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+Template\s*\(\s*[^,\n]*?\s*,\s*"
+        r"(?:(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)[A-Za-z_]\w*[^)\n]*"
+        r"|new\s+StringReader\s*\(\s*(?!['\" ]|new\b|null\b|\d|"
+        r"[A-Z][A-Z0-9_]{2,}\b)[A-Za-z_]\w*[^)\n]*\)\s*))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+Template\s*\(\s*[^,\n]*?\s*,\s*['\"][^)\n]*?['\"]\s*\+\s*"
+        r"(?!['\" ]|\d|[A-Z][A-Z0-9_]{2,}\b)[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:cfg|configuration|freemarkerConfig)\s*\.\s*getTemplate\s*\(\s*"
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"(?:(?:new\s+TemplateEngine\s*\([^)\n]*\)\s*\.\s*)|"
+        r"\b(?:templateEngine|thymeleafEngine|templateParser)\b\s*\.\s*)"
+        r"process\s*\(\s*"
+        r"(?:(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)[A-Za-z_]\w*[^)\n]*"
+        r"|['\"][^)\n]*?['\"]\s*\+\s*"
+        r"(?!['\" ]|\d|[A-Z][A-Z0-9_]{2,}\b)[A-Za-z_]\w*[^)\n]*)"
+        r"\))",
+        "A Java server-side template engine is fed a non-literal template source or name — CWE-1336 server-side template injection: Velocity.evaluate (4th arg), Freemarker new Template(name, src, cfg) / new StringReader(src) / configuration.getTemplate(name), and TemplateEngine.process(template, context) treat the markup string as code, so a request-influenced template can run Velocity directives, Freemarker ${...} interpolations or Thymeleaf __${...}__::.x preprocessing for remote code execution. Keep template markup in reviewed server-side files/constants only, never build it from request data; if user content must appear in a rendered page, pass it as a data-model value (Freemarker ${user!} / Velocity $user output-escaping) so it is data, not syntax. Literal templates, SCREAMING_SNAKE sources/names, the safe template.process(data, out) render step, unrelated receivers and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
