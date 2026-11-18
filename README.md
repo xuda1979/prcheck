@@ -585,6 +585,24 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   configuration through vetted channels (request-derived targets are
   R057's domain); TLS-scheme or non-literal targets, unrelated receivers
   and comment/string-literal reproductions stay quiet).
+  Java regex-compilation sink fed a non-literal pattern — CWE-1333 ReDoS /
+  regex injection: `Pattern.compile(..)` / `Pattern.matches(..)` and the
+  instance sinks `String.matches(..)`, `split(..)`, `replaceAll(..)` /
+  `replaceFirst(..)` (on any receiver chain, e.g.
+  `row.split(delim)`, `request.getParameter("list").split(sep)`) whose
+  pattern argument is a variable, request parameter, builder or a literal
+  prefix concatenated with a variable (`Pattern.compile("^[a-z]+" +
+  tier + "$")`) — an attacker-controllable pattern like `"(a+)+$"` against
+  adversarial input makes Java's backtracking engine take exponential time
+  (ReDoS, a CPU-exhaustion DoS) and can match/split/replace far beyond the
+  intended literal, so untrusted data must never reach a regex engine as a
+  pattern; fix by compiling only fixed, reviewed pattern literals (or
+  constants) and escaping user-supplied literals with `Pattern.quote(..)`;
+  literal patterns in every sink form, SCREAMING_SNAKE pattern constants
+  (`EMAIL_REGEX`, `CSV_DELIM`), the `Pattern.quote(..)` literal-escape idiom
+  (including a manual `\Q...\E` concat), argless non-regex calls
+  (`matcher.matches()`, `object.split()`, `Path.of(..)`, `indexOf(..)`) and
+  comment/string-literal reproductions stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

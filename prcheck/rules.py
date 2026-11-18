@@ -2492,6 +2492,76 @@ _RULE_TUPLES = [
         r")",
         "A Java network/HTTP call or JNDI binding pinned to a cleartext scheme literal — CWE-319 cleartext transmission: new URL/URI or URI.create with \"http://\" (or ws:///ftp://), a RestTemplate/WebClient/HttpClient request verb handed a cleartext literal URL, an OkHttp/HttpUrl builder .url(\"http://\")/HttpUrl.parse, or an LDAP provider configured with \"ldap://\" (Context.PROVIDER_URL / java.naming.provider.url / InitialDirContext ctor) sends the payload, cookies or LDAP bind credentials in the clear, so any attacker on the path can read or tamper with it. Fix: use the TLS variants — https:// / wss:// / ftps:// and ldaps:// (or STARTTLS for LDAP), and load URLs from config/request only through vetted channels (a request-derived target is R057's domain); cleartext schemes should be rejected at configuration review. TLS-scheme or non-literal targets and unrelated receivers stay quiet",
     ),
+    (
+        "R076-javaredos",
+        "security",
+        "high",
+        "Java regex-compilation sink (Pattern.compile / Pattern.matches / String.matches / split / replaceAll / replaceFirst) fed a non-literal pattern variable or concatenation — a request-derived pattern in a Java regex sink is catastrophic/ReDoS and regex-injection (CWE-1333)",
+        # CWE-1333 (Inefficient Regular Expression Complexity): Java regex
+        # sinks take the pattern as their FIRST argument, and a non-literal
+        # pattern fed from a variable, concatenation or request parameter is
+        # attacker-tunable: a crafted pattern like "(a+)+$" makes
+        # backtracking machines on such input take exponential time (ReDoS)
+        # and a malicious pattern can match/`split`/replace far more than the
+        # caller intended (regex injection). R034-redos owns Python re.* and
+        # JS RegExp sinks; this is the Java gap. Branches:
+        #   BR1  Pattern.compile(non-literal) — the static compile sink.
+        #   BR2  Pattern.matches(non-literal, input) — static matcher.
+        #   BR3  Pattern.compile(\"literal\" + nonLiteral + ...) — a literal
+        #        prefix/regex concatenated with a variable (only this sink
+        #        form: R051-R074 convention finds the same shape in
+        #        String.format / SQL); a quote preceded by \\Q is Java's
+        #        manual literal-quoting opener (Pattern.quote is the
+        #        API-form, handled by NLARG) and stays quiet.
+        #   BR4  String.matches(non-literal) on any receiver chain
+        #        (email.matches(badPattern), input.matches(param)) — the
+        #        `(?!Pattern\\b)` guard keeps Pattern.matches static calls
+        #        owned by BR2.
+        #   BR5  String.split(non-literal[, limit]) — delimiter from a
+        #        variable/parameter is an injection + ReDoS vector.
+        #   BR6  String.replaceAll / replaceFirst(non-literal, repl) —
+        #        same pattern-source risk.
+        # NLARG (the non-literal argument marker shared with the R072/R073
+        # Java series) rejects quoted literals, `new`-expressions, null,
+        # numbers and SCREAMING_SNAKE constants, and the safe
+        # Pattern.quote(userInput) / replaceAll(Pattern.quote(tok))
+        # literal-escape idiom stays quiet. Every branch carries the
+        # multi-part comment/literal boundary so comment/string-literal
+        # reproductions die on it; literal patterns in every sink form,
+        # constant delimiters, argless non-sink calls (matcher.matches(),
+        # object.split(), Path.of, indexOf), and unrelated receivers stay
+        # quiet. Java sources are case-sensitive (no inline flag);
+        # single-line contract.
+        r"(?:"
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bPattern\s*\.\s*compile\s*\(\s*"
+        r"(?!Pattern\s*\.\s*quote\b)(?!['\" ]|new\b|null\b|\d|"
+        r"[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bPattern\s*\.\s*matches\s*\(\s*"
+        r"(?!Pattern\s*\.\s*quote\b)(?!['\" ]|new\b|null\b|\d|"
+        r"[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bPattern\s*\.\s*compile\s*\([^)\n]*(?<![\\]Q)['\"]\s*\+\s*"
+        r"(?!['\" ]|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?!Pattern\b)(?:[A-Za-z_]\w*(?:\s*\([^)\n]*\))?\s*\.\s*)+"
+        r"matches\s*\(\s*"
+        r"(?!Pattern\s*\.\s*quote\b)(?!['\" ]|new\b|null\b|\d|"
+        r"[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:[A-Za-z_]\w*(?:\s*\([^)\n]*\))?\s*\.\s*)+"
+        r"split\s*\(\s*"
+        r"(?!Pattern\s*\.\s*quote\b)(?!['\" ]|new\b|null\b|\d|"
+        r"[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:[A-Za-z_]\w*(?:\s*\([^)\n]*\))?\s*\.\s*)+"
+        r"(?:replaceAll|replaceFirst)\s*\(\s*"
+        r"(?!Pattern\s*\.\s*quote\b)(?!['\" ]|new\b|null\b|\d|"
+        r"[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*)"
+        r")",
+        "A Java regex-compilation sink is fed a non-literal pattern — CWE-1333 ReDoS / regex injection: Pattern.compile / Pattern.matches / String.matches / split / replaceAll / replaceFirst whose pattern argument is a variable, request parameter, builder or concatenation, so the caller's data shapes the regex. An attacker-controllable pattern like \"(a+)+$\" against adversarial input makes Java's backtracking regex engine take exponential time (ReDoS, a CPU-exhaustion DoS) and can match/split/replace far beyond the intended literal, so untrusted data must never reach a regex engine as a pattern. Fix: compile only fixed, reviewed pattern literals (or constants), and when a user-supplied string must be matched literally escape it with Pattern.quote(...) so it is treated as text, not syntax. Literal patterns, SCREAMING_SNAKE constants, the Pattern.quote escape idiom, argless non-regex sink calls and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

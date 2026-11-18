@@ -3536,6 +3536,71 @@ def test_jvachttp_cleartext_negatives_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R075-jvachttp"], issues
 
 
+def test_javaredos_java_regex_sinks_flagged():
+    """R076-javaredos fires when the added line feeds a non-literal pattern
+    into a Java regex-compilation sink (CWE-1333): Pattern.compile /
+    Pattern.matches with a variable or request-derived argument, a literal
+    prefix concatenated with a variable, and String.matches / split /
+    replaceAll / replaceFirst on any receiver chain with a non-literal
+    pattern."""
+    src = (
+        'Pattern p = Pattern.compile(request.getParameter("regex"));\n'
+        'Pattern.compile(userInput);\n'
+        'Pattern.compile(builder.toString());\n'
+        'Pattern.compile(prefix + "|" + suffix);\n'
+        'boolean m = Pattern.matches(userPattern, data);\n'
+        'Pattern.matches(uuidFromClient, payload);\n'
+        'Pattern.compile("^[a-z]+" + tier + "$");\n'
+        'Pattern.compile("(?:" + groups + ")");\n'
+        'boolean ok = email.matches(badPattern);\n'
+        'if (input.matches(req.getParameter("pat"))) {\n'
+        'String[] cols = row.split(delim);\n'
+        'String[] parts = request.getParameter("list").split(sep);\n'
+        'String clean = text.replaceAll(userPattern, "");\n'
+        'text.replaceFirst(prefixRegex, "x");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R076-javaredos"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaredos_java_regex_negatives_stay_quiet():
+    """R076-javaredos stays quiet for literal patterns in every sink form,
+    SCREAMING_SNAKE pattern constants, the Pattern.quote(userInput) literal-
+    escape idiom (including a manual \\Q...\\E concat), argless non-regex
+    sink calls (matcher.matches(), object.split(), Path.of, indexOf), a
+    dynamic import/require-style receiver, and comment/string-literal
+    reproductions."""
+    src = (
+        'Pattern.compile("^[a-z]+$");\n'
+        'Pattern.compile("[a-z]+", Pattern.CASE_INSENSITIVE);\n'
+        'boolean ok = email.matches("^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\\\.[A-Z]{2,}$");\n'
+        'String[] cols = row.split(",");\n'
+        'String[] words = line.split("\\\\s+", -1);\n'
+        'String clean = text.replaceAll("\\\\s+", " ");\n'
+        'text.replaceFirst("[0-9]+", "#");\n'
+        'Pattern.compile(EMAIL_REGEX);\n'
+        'line.split(CSV_DELIM);\n'
+        'text.replaceAll(ILLEGAL_CHARS, "");\n'
+        'Pattern.compile(Pattern.quote(userLiteral));\n'
+        'text.replaceAll(Pattern.quote(tok), "X");\n'
+        'Pattern p = Pattern.compile("literal\\\\Q" + escaped + "\\\\E");\n'
+        'matcher.matches();\n'
+        'object.split();\n'
+        'Path p = Path.of(filename);\n'
+        'int i = text.indexOf("/");\n'
+        'Stream s = data.stream();\n'
+        '// Pattern.compile(request.getParameter("regex"));\n'
+        '// text.replaceAll(userPattern, "");\n'
+        'String t = "Pattern.compile(\\"(a+)+$\\");";\n'
+        'String u = "Pattern.compile(\\"^\\" + tier);";\n'
+        'String v = "row.split(delim);";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R076-javaredos"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -3736,6 +3801,7 @@ def test_every_rule_has_test_exposure():
         "R073-javaformat",
         "R074-javakeysz",
         "R075-jvachttp",
+        "R076-javaredos",
     }
     assert exposed <= rids
     uncovered = rids - exposed
