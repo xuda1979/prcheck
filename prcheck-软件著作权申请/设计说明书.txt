@@ -29,6 +29,9 @@ prcheck 面向 GitHub Pull Request 代码评审场景，解决"人工逐行审�
 检查，并对 OpenAPI 规范变更给出语义化版本建议，输出可操作的检查清单，
 作为 CI 合并门禁的一部分。
 
+本软件由许达在中国移动研究院独立设计、编码与测试完成，全部源代码均
+为作者原创，未借鉴或复制任何第三方软件。
+
 1.3 术语与缩略语
 ----------------
 - PR：Pull Request，拉取请求。
@@ -92,7 +95,7 @@ prcheck 面向 GitHub Pull Request 代码评审场景，解决"人工逐行审�
 | 模块文件          | 职责 |
 |-------------------|------|
 | prcheck/cli.py    | 命令行入口、参数过滤、退出码 |
-| prcheck/rules.py  | 21 条内置规则定义与逐行匹配 |
+| prcheck/rules.py  | 89 条内置规则定义与逐行匹配 |
 | prcheck/diff.py   | diff 文本解析、路径/行号提取 |
 | prcheck/openapi.py| OpenAPI 语义差异与 semver 分类 |
 | prcheck/engine.py | 分析编排与结果聚合 |
