@@ -3226,6 +3226,109 @@ def test_javatls_real_verification_or_unrelated_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R071-javatls"], issues
 
 
+def test_javaeval_script_engine_fed_injectable_code_flagged():
+    """R072-javaeval fires when the added line evaluates a non-literal code
+    string through a Java script/dynamic-code engine (CWE-94): ScriptEngineManager
+    getEngineBy*().eval, scriptEngine/engine/nashorn/rhino/groovyEngine/
+    pythonEngine receivers .eval, new GroovyShell().evaluate/parse,
+    GroovyClassLoader().parseClass, GroovyShell/GroovyClassLoader variable
+    receivers evaluate/parse/parseClass, JShell.create().eval / jshell.eval,
+    Beanshell Interpreter eval, NashornScriptEngineFactory().getScriptEngine()
+    .eval, string-concatenated eval sources, and conventional short staged
+    receivers (cl/gs/js/interp) eval-evaluate-parseClass-parse."""
+    src = (
+        'new ScriptEngineManager().getEngineByName("javascript").eval(request.getParameter("script"));\n'
+        'new ScriptEngineManager().getEngineByExtension("js").eval(req.getHeader("code"));\n'
+        'new ScriptEngineManager().getEngineByMimeType("text/javascript").eval(request.getQueryString());\n'
+        'engine.eval(userScript);\n'
+        'scriptEngine.eval(payload);\n'
+        'jsEngine.eval(request.getParameter("eval"));\n'
+        'nashorn.eval(code);\n'
+        'rhino.eval(script);\n'
+        'groovyEngine.eval(input);\n'
+        'pythonEngine.eval(scriptSource);\n'
+        'new GroovyShell().evaluate(request.getParameter("groovy"));\n'
+        'new GroovyShell(binding).evaluate(userCode);\n'
+        'groovyShell.evaluate(code);\n'
+        'groovy.evaluate(userCode);\n'
+        'new GroovyShell().parse(code);\n'
+        'new GroovyClassLoader().parseClass(request.getParameter("src"));\n'
+        'groovyShell.parseClass(sourceCode);\n'
+        'JShell.create().eval(request.getParameter("jshell"));\n'
+        'jshell.eval(script);\n'
+        'new Interpreter().eval(code);\n'
+        'interpreter.eval(request.getHeader("x-eval"));\n'
+        'new NashornScriptEngineFactory().getScriptEngine().eval(payload);\n'
+        'engine.eval("var x = " + request.getParameter("n"));\n'
+        'jsEngine.eval("var x = " + request.getParameter("n"));\n'
+        'jshell.eval("var r = " + userInput);\n'
+        'groovyShell.evaluate("def x = " + input);\n'
+        'new ScriptEngineManager().getEngineByName("groovy").eval(rule);\n'
+        'ScriptEngine js = manager.getEngineByName("js"); js.eval(code);\n'
+        'GroovyClassLoader cl = new GroovyClassLoader(); cl.parseClass(src);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R072-javaeval"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaeval_real_or_literal_engine_usage_stays_quiet():
+    """R072-javaeval stays quiet when the engine code is literal, staged
+    without an eval, using a non-injectable receiver or source, or is a
+    comment/string-literal reproduction: manager acquisition, eval with a
+    literal/null/numeric/constant/Reader source, setVariable/setBinding/
+    getLanguageName wiring, non-engine receiver evals (context/models/
+    metrics/evaluator), Compilable.compile, Interpreter constructor staging,
+    static-helper logs like logger.info("eval result = " + result), and
+    comment/string-literal reproductions of the firing forms."""
+    src = (
+        'new ScriptEngineManager().getEngineByName("js");\n'
+        'ScriptEngineManager manager = new ScriptEngineManager();\n'
+        'engine.eval(null);\n'
+        'engine.eval("1 + 1");\n'
+        'jshell.eval("System.out.println(1)");\n'
+        'new GroovyShell().evaluate("1 + 1");\n'
+        'new GroovyShell(binding).evaluate(new InputStreamReader(System.in));\n'
+        'binding.setVariable("name", userInput);\n'
+        'manager.getEngineByExtension("groovy");\n'
+        'groovyShell.setBinding(binding);\n'
+        'engine.getFactory().getLanguageName();\n'
+        'engine.eval(5);\n'
+        'interpreter.set("x", 5);\n'
+        'context.eval(code);\n'
+        'models.eval(query);\n'
+        'metrics.eval(timeout);\n'
+        '// jshell.eval(code);\n'
+        '// engine.eval(script);\n'
+        'String s = "jshell.eval(code)";\n'
+        'String s = "engine.eval(payload)";\n'
+        '// groovyShell.evaluate(userCode);\n'
+        '// new GroovyShell().evaluate(request.getParameter("groovy"));\n'
+        '// new ScriptEngineManager().getEngineByName("js").eval(script);\n'
+        'String s = "new GroovyShell().evaluate(a)";\n'
+        'ScriptEngine e = mgr.getEngineByName("js"); e.eval("1+1");\n'
+        'js.eval("1+1");\n'
+        'cl.parseClass("class A {}");\n'
+        'gs.evaluate("1+1");\n'
+        'interp.eval("2+2");\n'
+        '// js.eval(code);\n'
+        'ScriptEngine engine = manager.getEngine("groovy");\n'
+        '((Compilable) engine).compile("1+1");\n'
+        'new Interpreter("x = 9;");\n'
+        'logger.info("eval result = " + result);\n'
+        'StringBuffer sb = new StringBuffer();\n'
+        'groovy.evaluate(null);\n'
+        'result = evaluator.process(code);\n'
+        'engine.eval(SCRIPT_CONSTANT);\n'
+        'engine.eval(new FileReader("script.groovy"));\n'
+        'jshell.analyzeSource("var x = 1");\n'
+        'GroovyShell groovyShell = new GroovyShell();\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R072-javaeval"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -3422,6 +3525,7 @@ def test_every_rule_has_test_exposure():
         "R069-javacsrf",
         "R070-javacook",
         "R071-javatls",
+        "R072-javaeval",
     }
     assert exposed <= rids
     uncovered = rids - exposed

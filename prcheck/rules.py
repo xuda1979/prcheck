@@ -2203,6 +2203,88 @@ _RULE_TUPLES = [
         r'|[^,;()]*trust(?:[_]?all|All)[A-Za-z0-9_]*(?:\s*[,}])))',
         "TLS is disabled at a layer where the app silently accepts any certificate or any host: a trust-all X509TrustManager (empty checkServerTrusted/checkClientTrusted, getAcceptedIssuers returning null/empty), a HostnameVerifier.verify that always returns true, a permissive verifier set on HttpsURLConnection (setDefaultHostnameVerifier makes it the JVM-wide default), Apache HttpClientBuilder.disableHostnameVerification(), an OkHttp hostnameVerifier(lambda -> true), or SSLContext.init with an empty TrustManager[]/trustAll anchor. An active MITM attacker can then present any certificate and any hostname and read or rewrite all traffic (logins, tokens, PII), defeating the entire purpose of TLS. Fix: use the platform trust store through the default TrustManagerFactory / KeyManagerFactory and never disable hostname verification in production connections; if a private CA must be trusted, pin its certificate or use a lean audited custom TrustManager whose checkServerTrusted actually validates chain, subject, expiry, signature and revocations and whose checkClientTrusted/verify perform real checks; prefer java.net.http.HttpClient or Apache HttpClient 5, which verify hostnames by default. Never ship a blanket trust-all manager or always-true hostname verifier; if a test/diagnostic endpoint genuinely needs one, gate it behind a non-default flag with a loud comment and CVE reference"
     ),
+    (
+        "R072-javaeval",
+        "security",
+        "high",
+        "Java script engine / dynamic code evaluation fed a request-derived or otherwise non-literal code string: ScriptEngineManager engine .eval, GroovyShell/GroovyClassLoader, JShell.eval, Beanshell Interpreter, or Nashorn ScriptEngine — attacker-controlled script runs with the server JVM's privileges (CWE-94)",
+        # CWE-94 (Improper Control of Generation of Code / Code Injection):
+        # Java script-/code-engine sinks below compile and run the given
+        # character sequence inside the server JVM, so a non-literal source
+        # (request accessor, 'prefix' + lowercaseIdentifier concatenation, or
+        # a bare identifier) gives the attacker arbitrary code execution with
+        # the application's privileges — no sandbox by default:
+        #   BR1  new GroovyShell(...).evaluate/parse
+        #   BR2  new GroovyClassLoader([...]).parseClass
+        #   BR3  groovy-family staged receivers (.evaluate / .parse /
+        #        .parseClass)
+        #   BR4  JShell.create().eval / jshell.eval
+        #   BR5  new ScriptEngineManager().getEngineBy(Name|Extension|
+        #        MimeType)(...)  inline  then .eval
+        #   BR6  named engine receivers (scriptEngine/engine/jsEngine/
+        #        nashorn/rhino/nashornEngine/groovyEngine/pythonEngine).eval
+        #   BR7  new Interpreter().eval (Beanshell)
+        #   BR8  interpreter.eval
+        #   BR9  new NashornScriptEngineFactory().getScriptEngine().eval
+        #   BR10 'literal' + var concatenation source on the engine receivers
+        #        (same receiver set as BR6)
+        #   BR11 conventional short staged receivers cl/gs/js/interp with
+        #        eval/evaluate/parseClass/parse
+        # The first argument must be non-literal: no opening quote, no
+        # new/null/number, no SCREAMING_SNAKE constant, and not a
+        # java.io.Reader/stream source (a wire Authorizer would never eval a
+        # stream).  Every branch carries the multi-part comment/literal
+        # boundary, so code-only constructions, manager acquisition,
+        # getEngineBy* without .eval, setBinding/compile("") staging, string
+        # literals and comment reproductions stay quiet.  Java sources are
+        # case-sensitive CamelCase, so no inline flag (R053-R071
+        # convention); single-line contract.
+        r"(?:"
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r'(?:new\s+)GroovyShell\s*\([^)\n]*\)\s*\.\s*'
+        r'(?:evaluate|parse)\s*\('
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r'(?:new\s+)GroovyClassLoader\s*\(\s*\)\s*\.\s*parseClass\s*\('
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r'\b(?:groovyShell|groovyClassLoader|gShell|grShell|groovy|sh)\b'
+        r'\s*\.\s*(?:evaluate|parse(?:Class)?)\s*\('
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r'(?:JShell\s*\.\s*create\s*\(\s*\)|\bjshell\b)\s*\.\s*eval\s*\('
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r'new\s+ScriptEngineManager\s*\(\s*\)\s*\.\s*'
+        r'getEngineBy(?:Name|Extension|MimeType)\s*\([^)\n]*\)\s*\.\s*eval\s*\('
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r'\b(?:scriptEngine|engine|jsEngine|nashorn|rhino|nashornEngine|'
+        r'groovyEngine|pythonEngine)\b\s*\.\s*eval\s*\('
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r'(?:new\s+)Interpreter\s*\(\s*\)\s*\.\s*eval\s*\('
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r'\binterpreter\b\s*\.\s*eval\s*\('
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r'new\s+NashornScriptEngineFactory\s*\(\s*\)\s*\.\s*'
+        r'getScriptEngine\s*\(\s*\)\s*\.\s*eval\s*\('
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r'\b(?:scriptEngine|engine|jsEngine|jshell|interpreter|groovyShell|'
+        r'nashorn|nashornEngine|rhino|groovyEngine|pythonEngine|groovy)\b'
+        r'\s*\.\s*(?:eval|evaluate)\s*\('
+        r"[^)\n]*['\"]\s*\+\s*"
+        r"(?!['\" ]|\d|[A-Z][A-Z0-9_]{2,}\b)[A-Za-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r'\b(?:cl|gs|js|interp)\b\s*\.\s*'
+        r'(?:eval|evaluate|parseClass|parse)\s*\('
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*[^)\n]*\))"
+        r")",
+        "A Java expression/script engine evaluates a non-literal code string — CWE-94 code injection. ScriptEngineManager .eval, GroovyShell/GroovyClassLoader, JShell.eval, Beanshell Interpreter and Nashorn all run the source with the server JVM's privileges (no sandbox by default), so request-derived or concatenated code gives the attacker remote code execution; fix by compiling only fixed server-side scripts (never concatenating request data), keeping engines off request paths, and if an engine is unavoidable, evaluate inside the most restrictive sandbox the engine offers with no filesystem/network permission and a minimal classloader",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

@@ -521,7 +521,25 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   `init` receivers, trust-anchor staging (`SSLContext.getInstance`,
   `System.setProperty` trustStore, `init(.., null|trustStoreManagers|tm, ..)`),
   `verify` call sites / non-SSL signatures and string-literal/comment
-  reproductions stay quiet).
+  reproductions stay quiet), Java script-engine / dynamic code evaluation —
+  CWE-94: `new ScriptEngineManager().getEngineBy*(..).eval(nonLiteral)`,
+  `engine|scriptEngine|nashorn|rhino|groovyEngine|pythonEngine .eval(..)`,
+  `new GroovyShell().evaluate|parse(..)` / `GroovyClassLoader()
+  .parseClass(..)` / Groovy receivers `evaluate|parse|parseClass`,
+  `JShell.create().eval(..)` / `jshell.eval(..)`, Beanshell
+  `new Interpreter().eval(..)` / `interpreter.eval(..)`,
+  `new NashornScriptEngineFactory().getScriptEngine().eval(..)`,
+  string-concatenated eval sources (`engine.eval("var x = " + req..)`), and
+  conventional short receivers `cl|gs|js|interp .eval|evaluate|parseClass|
+  parse(..)` — an attacker-controlled script runs with the server JVM's
+  privileges (no sandbox by default), so request-derived or concatenated code
+  is RCE; fix by compiling only fixed server-side scripts (never concatenating
+  request data) and keeping engines off request paths; manager acquisition,
+  staged `getEngineBy*` / `getEngine` without an eval, bare
+  `setVariable`/`setBinding`/`getLanguageName` wiring, `Compilable.compile(..)`,
+  evals with literal/`null`/numeric/ALL_CAPS-constant/`FileReader` sources,
+  non-engine receivers (`context`/`models`/`metrics`/`evaluator`
+  `.process(..)`) and string-literal/comment reproductions stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
