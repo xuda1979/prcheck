@@ -3133,6 +3133,99 @@ def test_javacook_hardened_or_unrelated_cookie_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R070-javacook"], issues
 
 
+def test_javatls_trust_all_or_unverified_tls_flagged():
+    """R071-javatls fires when Java code disables TLS certificate or
+    hostname verification on the added line (CWE-295): an empty-body
+    X509TrustManager checkServerTrusted/checkClientTrusted, getAcceptedIssuers
+    returning null or an empty X509Certificate array, a HostnameVerifier.verify
+    returning true unconditionally, permissive wiring of
+    setDefaultHostnameVerifier(bareIdent) /
+    setHostnameVerifier(lambda-true|trustAllVerifier),
+    disableHostnameVerification(), an OkHttp builder
+    .hostnameVerifier(lambda-true) chain, or SSLContext.init with an
+    empty/trustAll trust anchor."""
+    src = (
+        'public void checkServerTrusted(X509Certificate[] chain, String authType) { }\n'
+        'public void checkClientTrusted(X509Certificate[] chain, String authType) {}\n'
+        'public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException {}\n'
+        'public X509Certificate[] getAcceptedIssuers() { return null; }\n'
+        'public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }\n'
+        'public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[] { }; }\n'
+        'public boolean verify(String hostname, SSLSession session) { return true; }\n'
+        'protected boolean verify(String hostname, SSLSession session) { return true; }\n'
+        'HttpsURLConnection.setDefaultHostnameVerifier(hv);\n'
+        'HttpsURLConnection.setDefaultHostnameVerifier(permissiveVerifier);\n'
+        'conn.setHostnameVerifier((hostname, session) -> true);\n'
+        'connection.setHostnameVerifier((h, s) -> { return true; });\n'
+        'conn.setHostnameVerifier(trustAllVerifier);\n'
+        'builder.disableHostnameVerification();\n'
+        'httpClientBuilder.disableHostnameVerification();\n'
+        'client.newBuilder().hostnameVerifier((hostname, session) -> true);\n'
+        'new OkHttpClient.Builder().hostnameVerifier((h, s) -> { return true; });\n'
+        'sslContext.init(keyManagers, trustAllCerts, new SecureRandom());\n'
+        'sslContext.init(null, new TrustManager[] { trustAll }, new SecureRandom());\n'
+        'sslContext.init(null, new TrustManager[0], null);\n'
+        'sslContext.init(null, new TrustManager[] { }, null);\n'
+        'sslCtx.init(kms, new TrustManager[] { trustAllCerts }, random);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R071-javatls"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javatls_real_verification_or_unrelated_stays_quiet():
+    """R071-javatls stays quiet when trust evaluation is real or the text is
+    unrelated: checkServerTrusted/checkClientTrusted/verify with a real body,
+    verifier call sites or non-SSL signatures, getAcceptedIssuers returning a
+    real collection, safe default verifier wiring (null, new Secure...,
+    getDefaultHostnameVerifier(), hostname.equals(session.getPeerHost())
+    lambdas), disableHostnameVerification call sites or an off-wiring call,
+    non-trustAll trust-anchor staging (SSLContext.getInstance,
+    System.setProperty trustStore, sslContext.init(null, null, ..) / with
+    trustStoreManagers / a plain tm array), TrustManager array declarations,
+    and string-literal/comment reproductions."""
+    src = (
+        'public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException { validateChain(chain); }\n'
+        'tm.checkServerTrusted(chain, authType);\n'
+        'sc.checkClientTrusted(chain, authType);\n'
+        'public void checkServerTrusted(X509Certificate[] chain, String authType) throws CertificateException;\n'
+        'public X509Certificate[] getAcceptedIssuers() { return trustedCerts; }\n'
+        'public X509Certificate[] getAcceptedIssuers() { return cacerts.toArray(new X509Certificate[0]); }\n'
+        'public boolean verify(String hostname, SSLSession session) { return hostname.equals(session.getPeerHost()); }\n'
+        'public boolean verify(String hostname, SSLSession session) { return HttpsURLConnection.getDefaultHostnameVerifier().verify(hostname, session); }\n'
+        'verifier.verify(hostname, session);\n'
+        'public boolean verify(String hostname, String authType) { return true; }\n'
+        'HttpsURLConnection.setDefaultHostnameVerifier(new SecureHostnameVerifier());\n'
+        'HttpsURLConnection.setDefaultHostnameVerifier(null);\n'
+        'HttpsURLConnection.setDefaultHostnameVerifier(getDefaultHostnameVerifier());\n'
+        'conn.setHostnameVerifier(HttpsURLConnection.getDefaultHostnameVerifier());\n'
+        'conn.setHostnameVerifier(verifier);\n'
+        'conn.setHostnameVerifier((hostname, session) -> hostname.equals(session.getPeerHost()));\n'
+        'connection.setHostnameVerifier(null);\n'
+        'new OkHttpClient.Builder().hostnameVerifier(HttpsURLConnection.getDefaultHostnameVerifier());\n'
+        'client.hostnameVerifier();\n'
+        'String s = "public void checkServerTrusted(X509Certificate[] chain, String authType) { }";\n'
+        'String s = "HttpsURLConnection.setDefaultHostnameVerifier(hv);";\n'
+        '// public boolean verify(String hostname, SSLSession session) { return true; }\n'
+        '// public X509Certificate[] getAcceptedIssuers() { return null; }\n'
+        'String s = "public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }";\n'
+        'String s = "conn.setHostnameVerifier((hostname, session) -> true);";\n'
+        '// builder.disableHostnameVerification();\n'
+        '// sslContext.init(null, trustAllCerts, new SecureRandom());\n'
+        'X509TrustManager tmx = new X509TrustManager() {\n'
+        'TrustManager[] trustAllCerts = new TrustManager[] { tm };\n'
+        'SSLContext.getInstance("TLS");\n'
+        'System.setProperty("javax.net.ssl.trustStore", "cacerts");\n'
+        'sslContext.init(keyManagers, trustStoreManagers, new SecureRandom());\n'
+        'sslContext.init(null, null, new SecureRandom());\n'
+        'sslContext.init(kms, new TrustManager[] { tm }, random);\n'
+        'httpClientBuilder.disableHostnameVerification(false);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R071-javatls"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -3328,6 +3421,7 @@ def test_every_rule_has_test_exposure():
         "R068-javarandom",
         "R069-javacsrf",
         "R070-javacook",
+        "R071-javatls",
     }
     assert exposed <= rids
     uncovered = rids - exposed

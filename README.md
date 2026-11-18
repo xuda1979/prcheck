@@ -500,7 +500,28 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   (`Integer.toString(count)`, `getJwt()` with flags set), staged cookies
   passed to `response.addCookie(cookie)`, `setMaxAge`/`setPath`/`setDomain`/
   `setComment`, `setHeader("Set-Cookie", ...)` writes, hardening reads and
-  string-literal/comment reproductions stay quiet).
+  string-literal/comment reproductions stay quiet), and Java code that disables
+  TLS certificate or hostname verification — CWE-295: an empty-body
+  `X509TrustManager` (`checkServerTrusted`/`checkClientTrusted` with an
+  immediately-closed body), `getAcceptedIssuers` returning `null` or an empty
+  `X509Certificate` array, a `HostnameVerifier.verify(String, SSLSession)`
+  returning `true` unconditionally, permissive verifier wiring
+  (`HttpsURLConnection.setDefaultHostnameVerifier(bareIdent)` — JVM-wide
+  default; `conn.setHostnameVerifier(lambda -> true | trustAllVerifier)`),
+  `*Builder.disableHostnameVerification()`, an OkHttp
+  `client.newBuilder().hostnameVerifier((h, s) -> true)` chain, or
+  `sslContext.init(.., empty|trustAll TrustManager[], ..)` with the trust
+  anchor wiped — an active MITM can present any certificate/hostname and read
+  or rewrite all traffic; real checks (a chain-validating
+  `checkServerTrusted`, `getAcceptedIssuers` returning `trustedCerts` /
+  `cacerts.toArray(...)`, `verify` comparing `hostname.equals(
+  session.getPeerHost())` or delegating to
+  `HttpsURLConnection.getDefaultHostnameVerifier()`), safe wiring (`null`, `new
+  SecureHostnameVerifier()`, `getDefaultHostnameVerifier()`), non-`sslContext`
+  `init` receivers, trust-anchor staging (`SSLContext.getInstance`,
+  `System.setProperty` trustStore, `init(.., null|trustStoreManagers|tm, ..)`),
+  `verify` call sites / non-SSL signatures and string-literal/comment
+  reproductions stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

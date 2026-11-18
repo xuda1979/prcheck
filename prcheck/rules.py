@@ -2114,6 +2114,95 @@ _RULE_TUPLES = [
         r'[A-Za-z_]\w*\s*\.\s*set(?:Secure|HttpOnly)\s*\(\s*false\s*\))',
         "Servlet Cookie carrying or receiving a session/security value is created without c.setSecure(true) / c.setHttpOnly(true), or the flags are explicitly disabled — CWE-614/CWE-1004. Without Secure the cookie travels in cleartext (sniffable from HttpOnly distance on the wire / MITM LAN), and without HttpOnly a successful XSS can read it via document.cookie and replay the session or token. When creating a per-session or security cookie, always set Cookie.setSecure(true) (serve it only over HTTPS) and Cookie.setHttpOnly(true) (hide it from script) on the SAME statement or immediately on the staged cookie before response.addCookie(cookie); keep setMaxAge(0)/setMaxAge(-1) for expiry, never setSecure(false)/setHttpOnly(false), and prefer short-lived, signed/opaque values (a random SessionId with secure+httponly over embedding JWTs in cookies). The flags themselves do not fix an exfiltrated token at rest — also rotate the value on logout and scope cookies by path/domain",
     ),
+    (
+        "R071-javatls",
+        "security",
+        "high",
+        "Java code that disables TLS certificate or hostname verification: trust-all X509TrustManager (empty checkServerTrusted/checkClientTrusted or getAcceptedIssuers returning null/empty), HostnameVerifier.verify returning true unconditionally, setDefaultHostnameVerifier/setHostnameVerifier with a permissive verifier, HttpClientBuilder.disableHostnameVerification(), or SSLContext.init with an empty/trustAll trust anchor (CWE-295)",
+        # CWE-295 (Improper Certificate Validation): TLS security decisions
+        # delegated to trust-all or identity-blank code that accepts any
+        # certificate and any host name, breaking the server-authentication
+        # guarantee of HTTPS/TLS.  Fires on the added line, across these
+        # forms:
+        #   BR1  empty-body X509TrustManager overrides checkServerTrusted /
+        #        checkClientTrusted (the manager accepts every chain; the
+        #        body is closed immediately with nothing validated);
+        #   BR2  getAcceptedIssuers returns null / new X509Certificate[0] /
+        #        new X509Certificate[] {} — no trust anchor for the chain
+        #        (a leading public/protected/private/final modifier is
+        #        required: real TrustManager implementations are public, and
+        #        the modifier puts the boundary at the '// ' prefix so
+        #        comment/string-literal reproductions die on the multi-part
+        #        boundary);
+        #   BR3  HostnameVerifier.verify(String, SSLSession) returning true
+        #        unconditionally (public/protected/private form — the bare
+        #        `boolean verify(String, SSLSession)` without a modifier is
+        #        left quiet so comment reproductions die on the boundary);
+        #   BR4a HttpsURLConnection.setDefaultHostnameVerifier(bareIdent)
+        #        (the permissive verifier becomes the JVM-wide default —
+        #        null / new SecureHostnameVerifier() / a method-call arg
+        #        stay quiet);
+        #   BR4b anyReceiver.setHostnameVerifier(lambda -> true /
+        #        { return true; } or a trust/TrustAll-named verifier
+        #        variable) — getDefaultHostnameVerifier() rewiring is the
+        #        safe restore and stays quiet (excluded by lookahead);
+        #   BR4c anyReceiver.disableHostnameVerification() (Apache
+        #        HttpClientBuilder and similar builder flavouring);
+        #   BR4d okhttp builder chain .hostnameVerifier(lambda-true) on an
+        #        ident chain (client.newBuilder()) or a new Constructor()
+        #        receiver;
+        #   BR5  sslContext-family .init(firstArg, <trust-anchor param>, ...)
+        #        where the SECOND argument is empty/off: new TrustManager[0],
+        #        new TrustManager[] {} or a trustAll-named array or variable,
+        #        so the trust manager list carries no real anchor.
+        # Real implementations stay quiet: checkServerTrusted/checkClientTrusted /
+        # verify with a real body, getAcceptedIssuers with a real collection,
+        # verifier.verify(...) call sites, verify(String, String) (non-SSL)
+        # signatures, null / new SecureHostnameVerifier() /
+        # getDefaultHostnameVerifier() wiring and lambdas comparing
+        # hostname.equals(session.getPeerHost()), disableHostnameVerification()
+        # call sites without the call, TrustManager[] tm / trustStoreManagers /
+        # non-trustAll arrays in init, SSLContext.getInstance() /
+        # System.setProperty trustStore staging, and string-literal or comment
+        # reproductions (every branch carries the multi-part comment/literal
+        # boundary).  No inline flag (R053-R070 convention); single-line
+        # contract.
+        r'(?:(?<![/\w\'"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)'
+        r'(?:public|protected|private|final)\s+void\s+'
+        r'check(?:Server|Client)Trusted\s*\([^)]*\)\s*'
+        r'(?:throws\s+[\w.]+(?:\s*,\s*[\w.]+)*\s*)?\{\s*\})'
+        r'|(?:(?<![/\w\'"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)'
+        r'(?:public|protected|private|final)\s+'
+        r'X509Certificate\s*\[\s*\]\s*getAcceptedIssuers\s*\([^)]*\)\s*'
+        r'\{\s*return\s+(?:null|new\s+X509Certificate\s*'
+        r'(?:\[\s*0\s*\]|\[\s*\]\s*\{\s*\}))\s*;)'
+        r'|(?:(?<![/\w\'"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)'
+        r'(?:public|protected|private)\s+boolean\s+verify\s*\('
+        r'\s*String\s+\w+\s*,\s*SSLSession\s+\w+\s*\)\s*\{\s*return\s+true\s*;?\s*\})'
+        r'|(?:(?<![/\w\'"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)'
+        r'[A-Za-z_]\w*\s*\.\s*setDefaultHostnameVerifier\s*\('
+        r'\s*(?!null\b)(?!new\s+)[A-Za-z_]\w*\s*\))'
+        r'|(?:(?<![/\w\'"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)'
+        r'[A-Za-z_]\w*\s*\.\s*setHostnameVerifier\s*\('
+        r'(?!(?:.*get\w*DefaultHostnameVerifier\b))'
+        r'(?:[^;\n]*?->\s*(?:true\b|\{\s*return\s+true\s*;?\s*\})'
+        r'|trust(?:[_]?all|All)[A-Za-z0-9_]*))'
+        r'|(?:(?<![/\w\'"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)'
+        r'[A-Za-z_]\w*\s*\.\s*disableHostnameVerification\s*\(\))'
+        r'|(?:(?<![/\w\'"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)'
+        r'(?:[A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*(?:\s*\(\s*\))?)*'
+        r'|new\s+[\w.$]+(?:\.[A-Za-z_]\w*)*\s*\(\s*\))'
+        r'\s*\.\s*hostnameVerifier\s*\('
+        r'(?!(?:.*get\w*DefaultHostnameVerifier\b))'
+        r'[^;\n]*?->\s*(?:true\b|\{\s*return\s+true\s*;?\s*\}))'
+        r'|(?:(?<![/\w\'"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)'
+        r'(?:sslContext|sslCtx|SSLContext|tlsContext)\s*\.\s*init\s*\('
+        r'(?:[^,;()]*?)\s*,\s*(?:new\s+TrustManager\s*\[\s*0\s*\]'
+        r'|new\s+TrustManager\s*\[\s*\]\s*\{\s*'
+        r'(?:trust(?:[_]?all|All)[A-Za-z0-9_]*\s*)?\}\s*'
+        r'|[^,;()]*trust(?:[_]?all|All)[A-Za-z0-9_]*(?:\s*[,}])))',
+        "TLS is disabled at a layer where the app silently accepts any certificate or any host: a trust-all X509TrustManager (empty checkServerTrusted/checkClientTrusted, getAcceptedIssuers returning null/empty), a HostnameVerifier.verify that always returns true, a permissive verifier set on HttpsURLConnection (setDefaultHostnameVerifier makes it the JVM-wide default), Apache HttpClientBuilder.disableHostnameVerification(), an OkHttp hostnameVerifier(lambda -> true), or SSLContext.init with an empty TrustManager[]/trustAll anchor. An active MITM attacker can then present any certificate and any hostname and read or rewrite all traffic (logins, tokens, PII), defeating the entire purpose of TLS. Fix: use the platform trust store through the default TrustManagerFactory / KeyManagerFactory and never disable hostname verification in production connections; if a private CA must be trusted, pin its certificate or use a lean audited custom TrustManager whose checkServerTrusted actually validates chain, subject, expiry, signature and revocations and whose checkClientTrusted/verify perform real checks; prefer java.net.http.HttpClient or Apache HttpClient 5, which verify hostnames by default. Never ship a blanket trust-all manager or always-true hostname verifier; if a test/diagnostic endpoint genuinely needs one, gate it behind a non-default flag with a loud comment and CVE reference"
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
