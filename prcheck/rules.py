@@ -2050,6 +2050,70 @@ _RULE_TUPLES = [
         r"\s*\)",
         "Spring Security's CSRF filter has been switched OFF on an HttpSecurity receiver — CWE-352. Without the synchronizer-token check, Spring performs no cross-origin request forgery defense, so a victim's browser (auto-submitted form, script/img, fetch with credentials, or a pinned link) can silently replay state-changing POST/PUT/DELETE calls authenticated only by the session cookie. Remove the .disable() to keep HttpSecurity.requestMatchers(...).and().csrf() protection (Spring Boot's default) and re-train the app to emit/validate the per-session token; if a stateless API needs no 'session-fixation-style' cookie, authorize anonymous + token-authenticated access only through Spring Security's CORS, or set the exemption as narrowly as possible via http.csrf(csrf -> csrf.ignoringRequestMatchers(...)) rather than switching the whole filter off",
     ),
+    (
+        "R070-javacook",
+        "security",
+        "high",
+        "Java servlet Cookie holding/linked to a session or security value created without Secure/HttpOnly protection, or those flags explicitly disabled (CWE-614 / CWE-1004)",
+        # CWE-614/CWE-1004 (sensitive cookie without 'Secure' / 'HttpOnly'
+        # attribute): a Servlet Cookie carrying a session id, token, secret,
+        # credential or similar security value whose flags are left at
+        # defaults is sent over cleartext HTTP (Cookie: JSESSIONID=...) and is
+        # readable by document.cookie cross-site script — cookie links
+        # the browser to the account without channel or DOM protection.
+        # Fires three ways:
+        #   (1) new Cookie(...) whose FIRST string argument names a security
+        #       value (JSESSIONID, session/sessionid/sess/sid, token, auth,
+        #       jwt, csrf/xsrf, api_key/api-key, access/refresh/id_token,
+        #       secret, credential, rememberMe, principal, identity, ticket,
+        #       nonce, state, userid/user_id; name literal matched
+        #       case-insensitively via a scoped (?i:...) group),
+        #   (2) new Cookie(...) with a generic name whose VALUE argument is a
+        #       bare security-named identifier (sessionId, accessToken,
+        #       csrfToken, idToken, apiKey, jwt, secret, ticket, sid...
+        #       CamelCase-aware boundary; quoted literals and method-call
+        #       values stay quiet),
+        #   (3) an explicit flag disable on a Java identifier receiver —
+        #       *Cookie*.setSecure(false) / .setHttpOnly(false) (short
+        #       receivers c/ca/ck included) — protection turned OFF.
+        # Each constructor form carries the name+value hardening exclusions
+        # (?!(?:.*setSecure|.*setHttpOnly)\b) so a line that ALSO sends
+        # Secure(true)/HttpOnly(true) on the same added line (or conversely
+        # disables one flag, which Branch 3 then flags once) does not
+        # double-fire.  Multi-part boundary (?<![/\w'"*])(?<!/ )(?<!\* )(?<!//)
+        # keeps string-literal and comment reproductions quiet.  Quiet at the
+        # call site: non-security cookies (theme/lang/track/prefs/color/page/
+        # note/username), value assignment from quoted literals or method
+        # calls (new Cookie("num", Integer.toString(count))), passing an
+        # already-staged Cookie to response.addCookie(cookie), setMaxAge /
+        # setPath / setDomain / setComment / setValue, response header writes
+        # (setHeader("Set-Cookie", ...), R048-cookieset Python territory),
+        # request.getCookies()[i].setSecure(true) hardening, and a variable
+        # merely named cookie/String "cookie" declarations.  Case-sensitive
+        # CamelCase except the scoped (?i:...) name group; no inline flag
+        # (R053-R069 convention).  Single-line contract.
+        r'(?:(?<![/\w\'"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)(?!(?:.*set(?:Secure|HttpOnly)\b))'
+        r'\bnew\s+(?:javax\.servlet\.http\.)?Cookie\s*\('
+        r'(?P<q1>["\'])\b(?i:jsessionid|session|sess|sid|token|auth|jwt|csrf|xsrf|api[_-]?key|'
+        r'access[_-]?token|refresh[_-]?token|id[_-]?token|secret|credential|'
+        r'rememberme|remember[_-]?me|principal|identity|ticket|nonce|state|userid|user[_-]?id)'
+        r'(?:[A-Za-z0-9_-]*)?(?P=q1)'  # name-only: no value required
+        r'|(?<![/\w\'"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)(?!(?:.*set(?:Secure|HttpOnly)\b))'
+        r'new\s+(?:javax\.servlet\.http\.)?Cookie\s*\('
+        r'(?P<q2>["\'])(?:(?:jsessionid|session|sess|sid|token|auth|jwt|csrf|xsrf|api[_-]?key|'
+        r'access[_-]?token|refresh[_-]?token|id[_-]?token|secret|credential|'
+        r'rememberme|remember[_-]?me|principal|identity|ticket|nonce|state|userid|user[_-]?id)(?![\w-])'
+        r'|(?!jsessionid|session|sess|sid|token|auth|jwt|csrf|xsrf|api[_-]?key|'
+        r'access[_-]?token|refresh[_-]?token|id[_-]?token|secret|credential|'
+        r'rememberme|remember[_-]?me|principal|identity|ticket|nonce|state|userid|user[_-]?id)[^\s"/\\]){1,24}(?P=q2)'
+        r'\s*,\s*(?:session(?:id)?|sess|sid|token|jwt|csrf|xsrf|auth|secret|credential|'
+        r'principal|ticket|nonce|identity|user(?:[_-]?id|Id)|'
+        r'api(?:[_-]?key|Key)|access(?:[_-]?token|Token)|refresh(?:[_-]?token|Token)|'
+        r'id(?:[_-]?token|Token))'
+        r'|(?<![A-Za-z0-9_/\'"*])(?<!/ )(?<!\* )(?<!//)'
+        r'[A-Za-z_]\w*\s*\.\s*set(?:Secure|HttpOnly)\s*\(\s*false\s*\))',
+        "Servlet Cookie carrying or receiving a session/security value is created without c.setSecure(true) / c.setHttpOnly(true), or the flags are explicitly disabled — CWE-614/CWE-1004. Without Secure the cookie travels in cleartext (sniffable from HttpOnly distance on the wire / MITM LAN), and without HttpOnly a successful XSS can read it via document.cookie and replay the session or token. When creating a per-session or security cookie, always set Cookie.setSecure(true) (serve it only over HTTPS) and Cookie.setHttpOnly(true) (hide it from script) on the SAME statement or immediately on the staged cookie before response.addCookie(cookie); keep setMaxAge(0)/setMaxAge(-1) for expiry, never setSecure(false)/setHttpOnly(false), and prefer short-lived, signed/opaque values (a random SessionId with secure+httponly over embedding JWTs in cookies). The flags themselves do not fix an exfiltrated token at rest — also rotate the value on logout and scope cookies by path/domain",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

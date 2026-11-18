@@ -480,7 +480,27 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   changes), scoped `ignoring(?:Ant)?RequestMatchers(...)` exemptions,
   unrelated `cors`/`formLogin`/`httpBasic` `.disable()` calls,
   `@EnableWebSecurity` and non-keyword receivers (`getHttp().csrf().disable()`)
-  stay quiet).
+  stay quiet), and Java servlet cookies for security values created without
+  Secure/HttpOnly, or those flags explicitly disabled (a `new Cookie(...)`
+  whose FIRST string argument names a security value — `JSESSIONID`,
+  `session`/`sessionid`/`sess`/`sid`, `token`, `auth`, `jwt`, `csrf`/`xsrf`,
+  `api_key`/`api-key`, `access`/`refresh`/`id_token`, `secret`, `credential`,
+  `rememberMe`, `principal`, `identity`, `ticket`, `nonce`, `state`,
+  `userid`/`user_id`; name literal matched case-insensitively — OR whose
+  VALUE argument is a bare security-named identifier (`sessionId`,
+  `accessToken`, `csrfToken`, `idToken`, `apiKey`, `jwt`, `secret`, `ticket`,
+  `sid`...), OR an explicit `*Cookie*.setSecure(false)` /
+  `setHttpOnly(false)` flag disable on a Java identifier receiver — CWE-614
+  (sensitive cookie in an HTTPS session without `Secure`, sent over
+  cleartext/sniffable) / CWE-1004 (without `HttpOnly`, readable by
+  `document.cookie` XSS); the same added line hardening with
+  `setSecure(true)`/`setHttpOnly(true)` fires once (only Branch 3 if a flag
+  is disabled), and non-security cookies (`theme`/`lang`/`track`/`prefs`/
+  `color`/`page`/`note`/`username`), literal/method-call values
+  (`Integer.toString(count)`, `getJwt()` with flags set), staged cookies
+  passed to `response.addCookie(cookie)`, `setMaxAge`/`setPath`/`setDomain`/
+  `setComment`, `setHeader("Set-Cookie", ...)` writes, hardening reads and
+  string-literal/comment reproductions stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.

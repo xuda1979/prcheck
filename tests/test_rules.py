@@ -3054,6 +3054,85 @@ def test_javacsrf_spring_csrf_kept_on_or_unrelated_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R069-javacsrf"], issues
 
 
+def test_javacook_cookie_for_security_value_without_flags_flagged():
+    """R070-javacook fires when a Servlet Cookie holds or is linked to a
+    session/security value with no Secure/HttpOnly on the added line: a
+    security-named cookie created bare and added (JSESSIONID, sessionid, jwt,
+    auth_token, XSRF-TOKEN, api_key, secret, rememberMe, id_token, session_id,
+    userid, state, SID, sid), a generic-named cookie whose VALUE is a bare
+    security identifier (sessionId, csrfToken, accessToken, sid, oauthState,
+    freshSecret, uid...), or an explicit setSecure(false)/setHttpOnly(false)
+    on a cookie-named receiver (c, ca, cookie) (CWE-614/CWE-1004)."""
+    src = (
+        'httpResponse.addCookie(new Cookie("JSESSIONID", sessionId));\n'
+        'Cookie c = new Cookie("sessionid", req.getSession().getId());\n'
+        'Cookie csrfCookie = new Cookie("XSRF-TOKEN", csrfToken);\n'
+        'response.addCookie(new Cookie("auth_token", authToken));\n'
+        'Cookie c = new Cookie("jwt", accessToken);\n'
+        'cookie.setSecure(false);\n'
+        'ca.setHttpOnly(false);\n'
+        'new Cookie("session", sessionId); c.setSecure(false);\n'
+        'Cookie c = new Cookie("token", request.getParameter("st"));\n'
+        'new Cookie("api_key", getUserToken());\n'
+        'Cookie c = new Cookie("ref", accessToken);\n'
+        'Cookie c = new Cookie("returnUrl", sessionId);\n'
+        'new Cookie("secret", freshSecret);\n'
+        'Cookie c = new Cookie("SID", sid);\n'
+        'response.addCookie(new Cookie("id_token", idToken));\n'
+        'new Cookie("rememberMe", rememberToken);\n'
+        'Cookie c = new javax.servlet.http.Cookie("session_id", getSessionId());\n'
+        'Cookie c = new Cookie("userid", uid);\n'
+        'c.setSecure(false);\n'
+        'new Cookie("state", oauthState);\n'
+        'Cookie cookie = new Cookie("sessionid", sid); cookie.setHttpOnly(false);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R070-javacook"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javacook_hardened_or_unrelated_cookie_stays_quiet():
+    """R070-javacook stays quiet when the cookie is non-security (theme, lang,
+    track, prefs, color, page, note, username, num), the same added line
+    hardens it (setSecure(true)/setHttpOnly(true), incl. alongside a stale
+    bare cookie), the value is a quoted literal or method call
+    (Integer.toString(count), getJwt() with flags set), the code only stages
+    a cookie for response.addCookie(cookie) or mutates non-flag attributes
+    (setMaxAge/setPath/setDomain/setComment), the Set-Cookie goes through a
+    response header, hardening reads request.getCookies()[i].setSecure(true),
+    or the text is a string-literal/comment reproduction."""
+    src = (
+        'new Cookie("theme", "dark");\n'
+        'new Cookie("lang", "en");\n'
+        'Cookie c = new Cookie("JSESSIONID", sid); c.setSecure(true); c.setHttpOnly(true);\n'
+        'cookie.setSecure(true);\n'
+        'ck.setHttpOnly(true);\n'
+        'response.addCookie(cookie);\n'
+        'String s = "new Cookie(\\"token\\", t)";\n'
+        '// new Cookie("JSESSIONID", sid)\n'
+        'c.setMaxAge(3600);\n'
+        'c.setPath("/");\n'
+        'new Cookie("track", request.getParameter("t"));\n'
+        'new Cookie("prefs", "tokenValue");\n'
+        'Cookie c = new Cookie("color", "blue"); c.setSecure(true);\n'
+        'cookie.setDomain("example.com");\n'
+        'var c = new Cookie("page", "1");\n'
+        'new Cookie("num", Integer.toString(count));\n'
+        'sessionCookie.setMaxAge(-1);\n'
+        'String token = buildToken();\n'
+        'new Cookie("username", userName);\n'
+        'new Cookie("note", "hi");\n'
+        'httpResponse.setHeader("Set-Cookie", "sid=" + sid + "; HttpOnly");\n'
+        'request.getCookies()[0].setSecure(true);\n'
+        'String cookie = "http-only";\n'
+        'cookie.setComment("session cookie");\n'
+        'new Cookie("jwt", getJwt()); c.setHttpOnly(true); c.setSecure(true);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R070-javacook"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -3248,6 +3327,7 @@ def test_every_rule_has_test_exposure():
         "R067-javaxss",
         "R068-javarandom",
         "R069-javacsrf",
+        "R070-javacook",
     }
     assert exposed <= rids
     uncovered = rids - exposed
