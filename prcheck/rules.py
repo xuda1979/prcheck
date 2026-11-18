@@ -2013,6 +2013,43 @@ _RULE_TUPLES = [
         r"RandomStringUtils\s*\.\s*random)",
         "A Java security value (password, token, secret, nonce, salt, CSRF token, OTP, API key or session id) is minted from an insecure, predictable PRNG — CWE-330. java.util.Random is a seeded LCG and ThreadLocalRandom / Apache Commons lang3 RandomUtils / RandomStringUtils recover their state from a handful of outputs, so a reset-password or access token, session id, CSRF token or OTP derived from them can be replayed, guessed or brute-forced by an attacker; even the fixed-seed form new Random(42) produces a fully predictable sequence. Replace the call with a cryptographically secure generator: new SecureRandom(), SecureRandom.getInstanceStrong() for key material, sr.nextBytes()/sr.nextInt() for nonces/salts, or UUID.randomUUID() for opaque ids; inversely, treat any security value an insecure PRNG produced as compromised and rotate it",
     ),
+    (
+        "R069-javacsrf",
+        "security",
+        "high",
+        "Spring Security CSRF protection disabled: http.csrf().disable() or http.csrf(AbstractHttpConfigurer::disable / HttpSecurity::disable / csrf -> csrf.disable()) on an HttpSecurity-family receiver (http, httpSecurity, httpBuilder, httpHttp, httpConfig, httpConf, configure, security, registry, builder, config) (CWE-352)",
+        # CWE-352 (Cross-Site Request Forgery): turning Spring Security's CSRF
+        # token protection OFF on an HttpSecurity receiver removes the
+        # synchronizer-token defense against forged state-changing requests —
+        # a logged-in user's browser can be driven (auto-submitted form,
+        # img/script tag, fetch with credentials, prober link) into POST/PUT/
+        # DELETE mutations carrying only that user's session cookie, and the
+        # app executes them as if user-intended.  Fires on the classic
+        # http.csrf().disable() (deprecated but ubiquitous), the method-passed
+        # http.csrf(AbstractHttpConfigurer::disable) /
+        # http.csrf(HttpSecurity::disable) forms, and the lambda forms
+        # http.csrf(csrf -> csrf.disable()) (incl. the block
+        # http.csrf(csrf -> { csrf.disable(); })).  The receiver match is
+        # prefixed by a multi-part boundary (?<![/\w'"*])(?<!/ )(?<!\* )
+        # (?<!//)(?!/\*) so a string literal ("http.csrf().disable()") or
+        # comment reproduction (// http.csrf().disable(), /* ... */, javadoc
+        # * ...) stays quiet; getHttp().csrf().disable() is quiet (receiver
+        # not a raw keyword).  Quiet forms — CSRF protection STAYS ON:
+        # http.csrf().csrfTokenRepository(...) (only the token store changes),
+        # http.csrf(csrf -> csrf.csrfTokenRepository(repo)) ,
+        # http.csrf().ignoringAntMatchers/ignoringRequestMatchers(...)
+        # (scoped exemptions), http.csrf().enable(), bare http.csrf(),
+        # http.csrfTokenRepository(repo), @EnableWebSecurity (enables,
+        # not disables), and unrelated .disable() calls (cors, formLogin,
+        # httpBasic).  Case-sensitive CamelCase, no inline flag (R053-R068
+        # convention).  Single-line contract.
+        r'(?<![/\w\'"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)(?:http|httpSecurity|httpBuilder|httpHttp|httpConfig|httpConf|configure|security|registry|builder|config)\s*\.\s*csrf\s*\(\s*\)\s*\.\s*disable\s*\(\s*\)'
+        r"|(?<![/\w\"'*])(?<!/ )(?<!\* )(?<!//)(?!/\*)(?:http|httpSecurity|httpBuilder|httpHttp|httpConfig|httpConf|configure|security|registry|builder|config)\s*\.\s*csrf\s*\(\s*"
+        r"(?:(?:AbstractHttpConfigurer|HttpSecurity)\s*::\s*disable"
+        r"|([A-Za-z_]\w*)\s*->\s*\{?\s*\1\s*\.\s*disable\s*\(\s*\)\s*[;}]?\s*\}?)"
+        r"\s*\)",
+        "Spring Security's CSRF filter has been switched OFF on an HttpSecurity receiver — CWE-352. Without the synchronizer-token check, Spring performs no cross-origin request forgery defense, so a victim's browser (auto-submitted form, script/img, fetch with credentials, or a pinned link) can silently replay state-changing POST/PUT/DELETE calls authenticated only by the session cookie. Remove the .disable() to keep HttpSecurity.requestMatchers(...).and().csrf() protection (Spring Boot's default) and re-train the app to emit/validate the per-session token; if a stateless API needs no 'session-fixation-style' cookie, authorize anonymous + token-authenticated access only through Spring Security's CORS, or set the exemption as narrowly as possible via http.csrf(csrf -> csrf.ignoringRequestMatchers(...)) rather than switching the whole filter off",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

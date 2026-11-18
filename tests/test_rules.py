@@ -2978,6 +2978,82 @@ def test_javarandom_secure_or_keywordfree_random_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R068-javarandom"], issues
 
 
+def test_javacsrf_spring_csrf_disable_flagged():
+    """R069-javacsrf fires when an HttpSecurity-family receiver turns CSRF
+    protection OFF: the classic http.csrf().disable() (deprecated), the
+    method-passed http.csrf(AbstractHttpConfigurer::disable) /
+    http.csrf(HttpSecurity::disable) forms, the lambda forms
+    csrf -> csrf.disable() (incl. the block form), on http, httpSecurity,
+    httpBuilder, httpHttp, httpConfig, httpConf, configure, security,
+    registry, builder or config (CWE-352)."""
+    src = (
+        'http.csrf().disable();\n'
+        'httpSecurity.csrf().disable();\n'
+        'http.csrf(AbstractHttpConfigurer::disable);\n'
+        'http.csrf(csrf -> csrf.disable());\n'
+        'http.csrf(c -> c.disable()).and().authorizeRequests();\n'
+        'registry.csrf().disable();\n'
+        'http.csrf().disable().and().formLogin();\n'
+        'builder.csrf(csrf -> csrf.disable());\n'
+        'config.csrf(AbstractHttpConfigurer::disable).and().build();\n'
+        'httpBuilder.csrf().disable();\n'
+        'httpConfig.csrf().disable();\n'
+        'security.csrf().disable();\n'
+        'configure.csrf().disable();\n'
+        'http.csrf(HttpSecurity::disable);\n'
+        'http.csrf(hsc -> hsc.disable());\n'
+        'return http.csrf().disable();\n'
+        'http.httpConf.csrf().disable();\n'
+        'http.csrf(csrf -> { csrf.disable(); });\n'
+        'if (http.csrf(c -> { c.disable(); }).and().authorizeRequests() != null) {}\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R069-javacsrf"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javacsrf_spring_csrf_kept_on_or_unrelated_stays_quiet():
+    """R069-javacsrf stays quiet when CSRF protection stays ON (token
+    repository swaps, scoped ignoringXxx exemptions, enable()), the call is
+    unrelated (cors/formLogin/httpBasic .disable(), bare http.csrf(),
+    http.csrfTokenRepository(repo)), the receiver is not a raw keyword
+    (getHttp().csrf().disable(), @EnableWebSecurity), or the text is a
+    string-literal/comment reproduction."""
+    src = (
+        'http.cors().disable();\n'
+        'http.formLogin().disable();\n'
+        'http.httpBasic().disable();\n'
+        'http.csrf().csrfTokenRepository(new CookieCsrfTokenRepository());\n'
+        'http.csrf().ignoringAntMatchers("/webhook/**");\n'
+        'http.csrf();\n'
+        'CookieCsrfTokenRepository repo = CookieCsrfTokenRepository.withHttpOnlyFalse();\n'
+        'String s = "http.csrf().disable()";\n'
+        'String s = "// http.csrf().disable()";\n'
+        'http.csrf().csrfTokenRepository(cookieCsrfTokenRepository);\n'
+        'http.authorizeRequests().antMatchers("/api/**").permitAll();\n'
+        '@EnableWebSecurity\n'
+        'csrfTokenRepository.saveToken(token);\n'
+        'http.csrf().enable();\n'
+        'http.csrfTokenRepository(repo);\n'
+        'http.csrf(csrf -> csrf.enable());\n'
+        'public SecurityFilterChain filterChain(HttpSecurity http) {\n'
+        'http.csrf(csrf -> csrf.csrfTokenRepository(repo));\n'
+        'server.csrf().disable();\n'
+        'http.csrf(csrf -> csrf.ignoringRequestMatchers("/h2"));\n'
+        '// http.csrf().disable()\n'
+        '/* http.csrf().disable() */\n'
+        '* http.csrf().disable() */\n'
+        'getHttp().csrf().disable();\n'
+        'http.csrf(csrf -> { csrf.csrfTokenRepository(repo); });\n'
+        'public void configure(AuthenticationManagerBuilder auth) {\n'
+        'http.csrf(c -> c.ignoringRequestMatchers("/actuator"));\n'
+        'MockMvc mockMvc = webAppContextSetup(http.csrf());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R069-javacsrf"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -3171,6 +3247,7 @@ def test_every_rule_has_test_exposure():
         "R066-javacrypto",
         "R067-javaxss",
         "R068-javarandom",
+        "R069-javacsrf",
     }
     assert exposed <= rids
     uncovered = rids - exposed

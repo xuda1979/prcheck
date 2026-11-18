@@ -466,6 +466,20 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   alternatives), `Math.random()` (R043 owns it in every language),
   keyword-free Random uses (rolls, sample indices) and staged receivers
   (`Random rnd = new Random()` with the `nextX()` call on a different line)
+  stay quiet), and Spring Security CSRF protection disabled (an
+  `HttpSecurity`-family receiver — `http`, `httpSecurity`, `httpBuilder`,
+  `httpHttp`, `httpConfig`, `httpConf`, `configure`, `security`, `registry`,
+  `builder`, `config` — turning CSRF OFF on the added line:
+  `http.csrf().disable()`, `http.csrf(AbstractHttpConfigurer::disable)`,
+  `http.csrf(HttpSecurity::disable)` or the lambda
+  `http.csrf(csrf -> csrf.disable())` (incl. the `{ csrf.disable(); }` block
+  form) — without the synchronizer-token check a logged-in browser can be
+  driven into state-changing POST/PUT/DELETE calls carrying only its session
+  cookie — CWE-352; string-literal/comment reproductions,
+  `csrfTokenRepository(...)` exchanges (protection stays on, only the store
+  changes), scoped `ignoring(?:Ant)?RequestMatchers(...)` exemptions,
+  unrelated `cors`/`formLogin`/`httpBasic` `.disable()` calls,
+  `@EnableWebSecurity` and non-keyword receivers (`getHttp().csrf().disable()`)
   stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
