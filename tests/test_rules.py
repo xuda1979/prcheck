@@ -3329,6 +3329,67 @@ def test_javaeval_real_or_literal_engine_usage_stays_quiet():
     assert not [i for i in issues if i.rule_id == "R072-javaeval"], issues
 
 
+def test_javaformat_injected_format_string_flagged():
+    """R073-javaformat fires when the added line feeds a non-literal format
+    string into a Java printf-family sink (CWE-134): String.format /
+    java.util.Formatter.format, System.out/err.printf, MessageFormat.format,
+    staged PrintWriter/PrintStream/printer/writer/out receivers
+    .printf/.format, the Locale-overload form with a non-literal format, and
+    a 'literal prefix' + variable concatenated format string."""
+    src = (
+        'String.format(request.getParameter("fmt"), a, b);\n'
+        'String.format(userInput, x);\n'
+        'Formatter.format(req.getParameter("f"), v);\n'
+        'System.out.printf(userFormat, x);\n'
+        'System.err.printf(request.getParameter("p"), val);\n'
+        'MessageFormat.format(request.getHeader("x-fmt"), obj);\n'
+        'out.printf(userPrompt, arg);\n'
+        'writer.format(request.getParameter("f"), v);\n'
+        'printWriter.format(input, a);\n'
+        'printStream.printf(reqFormat, v);\n'
+        'String.format("%d " + request.getParameter("n"), a);\n'
+        'String.format("val=" + userInput, b);\n'
+        'System.out.printf(Locale.US, userFormat, x);\n'
+        'String.format(Locale.US, request.getParameter("f"), a);\n'
+        'sb.append(String.format(request.getParameter("f"), a));\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R073-javaformat"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaformat_literal_format_string_stays_quiet():
+    """R073-javaformat stays quiet when the format string is a fixed literal
+    (with non-literal ARGUMENTS only — the safe idiom), the Locale overload
+    carries a literal format, the text is staging/declaration/non-call, the
+    receiver is unrelated, or it is a comment/string-literal reproduction."""
+    src = (
+        'String.format("Hello %s", name);\n'
+        'String.format("%d %s", count, label);\n'
+        'System.out.printf("%d", count);\n'
+        'System.out.printf("Hello %s%n", user);\n'
+        'out.printf("%s", result);\n'
+        'MessageFormat.format("You said {0}", input);\n'
+        'String.format("%s=%s", key, val);\n'
+        'System.out.printf(Locale.US, "%d", count);\n'
+        'String.format(Locale.US, "%d %s", a, b);\n'
+        'String fmt = request.getParameter("fmt");\n'
+        'String userInput = getParam("q");\n'
+        'PrintWriter out = new PrintWriter(resp.getWriter());\n'
+        'String.format = getString();\n'
+        'System.out.println("format string is here");\n'
+        'logger.info(String.format("total=%d", total));\n'
+        'formatter.append("x");\n'
+        'DecimalFormat df = new DecimalFormat("#.##");\n'
+        'System.out.printf(ANNUAL_REPORT_FMT, data);\n'
+        '// String.format(request.getParameter("fmt"), a, b);\n'
+        'String literal = "String.format(request.getParameter(\\"fmt\\"), a, b);";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R073-javaformat"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -3526,6 +3587,7 @@ def test_every_rule_has_test_exposure():
         "R070-javacook",
         "R071-javatls",
         "R072-javaeval",
+        "R073-javaformat",
     }
     assert exposed <= rids
     uncovered = rids - exposed

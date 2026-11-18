@@ -2285,6 +2285,77 @@ _RULE_TUPLES = [
         r")",
         "A Java expression/script engine evaluates a non-literal code string — CWE-94 code injection. ScriptEngineManager .eval, GroovyShell/GroovyClassLoader, JShell.eval, Beanshell Interpreter and Nashorn all run the source with the server JVM's privileges (no sandbox by default), so request-derived or concatenated code gives the attacker remote code execution; fix by compiling only fixed server-side scripts (never concatenating request data), keeping engines off request paths, and if an engine is unavoidable, evaluate inside the most restrictive sandbox the engine offers with no filesystem/network permission and a minimal classloader",
     ),
+    (
+        "R073-javaformat",
+        "security",
+        "high",
+        "Java format-string / printf sink fed a request-derived or otherwise non-literal format string: String.format, Formatter.format, System.out/err.printf, PrintWriter/PrintStream.printf/format, MessageFormat.format, or a 'literal prefix' + variable concatenation — attacker-controlled %-specifiers leak argument data and crash the JVM via IllegalFormatException (CWE-134)",
+        # CWE-134 (Use of Externally-Controlled Format String): the format
+        # argument to a printf-family sink is interpreted for %-specifiers.
+        # Java keeps argument type-safety, so there is no direct %n pointer
+        # walk like C, but an externally-controlled format string still
+        # leaks information (%s/%h/%x print whatever objects the caller
+        # passes as subsequent arguments — including credentials, tokens
+        # and heap-derived values) and yields a denial of service when a
+        # specifier mismatches the argument's type (IllegalFormatException).
+        # The injection form is a format string that itself derives from the
+        # request or is built by concatenation; a literal format string with
+        # non-literal ARGUMENTS is safe and stays quiet:
+        #   BR1  String.format(nonLiteralFmt, ...) / Formatter.format(nonLiteralFmt, ...)
+        #   BR2  System.out/err.printf(nonLiteralFmt, ...)
+        #   BR3  MessageFormat.format(nonLiteralFmt, ...)
+        #   BR4  staged PrintWriter/PrintStream writers .printf/.format(nonLiteralFmt, ...)
+        #   BR5  out/writer/printWriter/printStream/printer .printf/.format(nonLiteralFmt, ...)
+        #   BR6  String.format("prefix " + variable, ...) — concatenated
+        #        format string (literal-prefix concat source)
+        # Every branch carries the multi-part comment/literal boundary and the
+        # non-literal marker (no opening quote, no new/null/number, no
+        # SCREAMING_SNAKE constant). The Locale-overload form
+        # (printf(Locale.US, fmt, args)) puts the format string second, so a
+        # Locale qualifier is consumed first and the literal check is applied
+        # to the actual format argument — a literal format after Locale stays
+        # quiet, and a locale-looking token cannot be misread as a format.
+        # Java sources are case-sensitive CamelCase, so no inline flag
+        # (R053-R072 convention); single-line contract.
+        r"(?:"
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bString\s*\.\s*format\s*\("
+        r"(?:Locale\s*\.\s*[A-Za-z_][\w]*\s*(?:\([^)\n]*\))?\s*,\s*"
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*"
+        r"|(?!Locale\b)(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)"
+        r"\s*[A-Za-z_]\w*)[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bFormatter\s*\.\s*format\s*\("
+        r"(?:Locale\s*\.\s*[A-Za-z_][\w]*\s*(?:\([^)\n]*\))?\s*,\s*"
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*"
+        r"|(?!Locale\b)(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)"
+        r"\s*[A-Za-z_]\w*)[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bSystem\s*\.\s*(?:out|err)\s*\.\s*printf\s*\("
+        r"(?:Locale\s*\.\s*[A-Za-z_][\w]*\s*(?:\([^)\n]*\))?\s*,\s*"
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*"
+        r"|(?!Locale\b)(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)"
+        r"\s*[A-Za-z_]\w*)[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bMessageFormat\s*\.\s*format\s*\("
+        r"(?:Locale\s*\.\s*[A-Za-z_][\w]*\s*(?:\([^)\n]*\))?\s*,\s*"
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*"
+        r"|(?!Locale\b)(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)"
+        r"\s*[A-Za-z_]\w*)[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:out|pw|writer|printWriter|printStream|printer)\b\s*\.\s*"
+        r"(?:printf|format)\s*\("
+        r"(?:Locale\s*\.\s*[A-Za-z_][\w]*\s*(?:\([^)\n]*\))?\s*,\s*"
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*"
+        r"|(?!Locale\b)(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)"
+        r"\s*[A-Za-z_]\w*)[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bString\s*\.\s*format\s*\("
+        r"[^)\n]*['\"]\s*\+\s*"
+        r"(?!['\" ]|\d|[A-Z][A-Z0-9_]{2,}\b)[A-Za-z_]\w*)"
+        r")",
+        "A format string built from request data lets an attacker control the %-specifiers interpreted by String.format/printf: %s/%h/%x read whatever objects the code passes as arguments and a mismatched specifier kills the request with IllegalFormatException, so a format injected via request.getParameter/headers leaks argument data (credentials, tokens, PII) and denies service — CWE-134 externally-controlled format string. Fix: keep the format string a fixed compile-time literal (a \"...\" constant) and pass only runtime VALUES as arguments so input never reaches the format grammar; if a dynamic layout is truly unavoidable, parse the input against a fixed whitelist of specifiers before formatting and never let %-marking characters from the request reach the format position. Literal formats with variable arguments (String.format(\"%s\", name)) are unaffected and stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

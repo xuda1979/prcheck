@@ -539,7 +539,21 @@ The rule library lives in `prcheck/rules.py` and is a plain list of
   `setVariable`/`setBinding`/`getLanguageName` wiring, `Compilable.compile(..)`,
   evals with literal/`null`/numeric/ALL_CAPS-constant/`FileReader` sources,
   non-engine receivers (`context`/`models`/`metrics`/`evaluator`
-  `.process(..)`) and string-literal/comment reproductions stay quiet).
+  `.process(..)`) and string-literal/comment reproductions stay quiet),
+  Java format-string / printf injection — CWE-134:
+  `String.format` / `java.util.Formatter.format`,
+  `System.out|err.printf`, `MessageFormat.format`, staged
+  `PrintWriter|PrintStream|printer|writer|out .printf|format(..)`, the
+  `Locale`-overload form (`printf(Locale.US, nonLiteralFmt, ..)`) and a
+  `'literal prefix' + variable` concatenated format string — an
+  externally-controlled format string lets the attacker steer the
+  interpreted `%`-specifiers, leaking whatever objects the code passes as
+  arguments (`%s`/`%h`/`%x` → credentials, tokens, PII) and crashing the
+  request with `IllegalFormatException` when a specifier mismatches the
+  argument's type (DoS); fix by keeping the format string a fixed
+  compile-time literal and passing runtime values only as arguments;
+  literal formats with non-literal arguments (`String.format("%s", name)`)
+  and `Locale`-overload calls with a literal format stay quiet).
 - **Data** — PII fields, migrations, sensitive logging, destructive DML.
 - **Behavior** — swallowed exceptions, retries/timeouts, status codes,
   imports, system calls.
