@@ -3972,6 +3972,47 @@ def test_javaopen_response_body_echo_negatives_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R083-javaopen"], issues
 
 
+def test_javalog_request_derived_values_flagged():
+    """R084-javalog fires when a logging-framework call emits request-derived
+    or session-derived values (getParameter/getHeader/getQueryString/URI or
+    remote-addr/user/session-id accessors) into the log message."""
+    src = (
+        'logger.info(request.getParameter("user"));\n'
+        'log4j.LOG.info("login=" + req.getParameter("u"));\n'
+        'LOGGER.debug("raw headers: " + request.getHeader("X-Trace"));\n'
+        'log.warn("q=" + req.getQueryString());\n'
+        'logger.error("uri=" + request.getRequestURI());\n'
+        'LOG.fine("from=" + request.getRemoteAddr());\n'
+        'LOGGER.info("user=" + req.getRemoteUser());\n'
+        'Logger.getLogger("audit").severe("sid=" + request.getRequestedSessionId());\n'
+        'LoggerFactory.getLogger(X.class).error("err " + req.getHeader("Host"));\n'
+        'LogFactory.getLog(X.class).info("body=" + request.getParameter("data"));\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R084-javalog"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javalog_server_side_messages_stay_quiet():
+    """R084-javalog stays quiet when the logged message is built from
+    server-side data only, when System.out/err is used (R036-loginj owns
+    that), and for comment/string-literal reproductions."""
+    src = (
+        'logger.info("user " + user.getId() + " updated");\n'
+        'LOGGER.debug("total=" + stats.getTotal());\n'
+        'LOG.info("startup complete in " + (end - start) + "ms");\n'
+        'log.error("db down", ex);\n'
+        'System.out.println(request.getParameter("q"));\n'
+        'System.err.println("err " + req.getHeader("X"));\n'
+        'logger.info(PASSWORD);\n'
+        '// LOG.info("sid=" + request.getRequestedSessionId())\n'
+        'String tpl = "LOGGER.debug(\\"u=" + request.getParameter(\\"u\\") + \\"\\")";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R084-javalog"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4180,6 +4221,7 @@ def test_every_rule_has_test_exposure():
         "R081-javapw",
         "R082-javasecret",
         "R083-javaopen",
+        "R084-javalog",
     }
     assert exposed <= rids
     uncovered = rids - exposed
