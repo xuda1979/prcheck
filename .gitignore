@@ -10,3 +10,4 @@ dist/
 .future-code/
 # stdlib trace --count coverage artifacts
 *.cover
+prcheck-软件著作权申请/
