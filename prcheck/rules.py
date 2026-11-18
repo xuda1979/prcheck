@@ -2583,6 +2583,71 @@ _RULE_TUPLES = [
         r")",
         "A Java regex-compilation sink is fed a non-literal pattern — CWE-1333 ReDoS / regex injection: Pattern.compile / Pattern.matches / String.matches / split / replaceAll / replaceFirst whose pattern argument is a variable, request parameter, builder or concatenation, so the caller's data shapes the regex. An attacker-controllable pattern like \"(a+)+$\" against adversarial input makes Java's backtracking regex engine take exponential time (ReDoS, a CPU-exhaustion DoS) and can match/split/replace far beyond the intended literal, so untrusted data must never reach a regex engine as a pattern. Fix: compile only fixed, reviewed pattern literals (or constants), and when a user-supplied string must be matched literally escape it with Pattern.quote(...) so it is treated as text, not syntax. Literal patterns, SCREAMING_SNAKE constants, the Pattern.quote escape idiom, argless non-regex sink calls and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R077-javajson",
+        "security",
+        "high",
+        "Java JSON-lib deserialization sink (fastjson parseObject / Jackson readValue polymorphic) fed a non-literal payload",
+        # CWE-502 (Deserialization of Untrusted Data): the JSON deserializer
+        # gap left by R054-javadeser, which owns only ObjectInputStream /
+        # XMLDecoder sinks. fastjson's JSON.parseObject with no explicit class
+        # (or a generic/Object target) applies polymorphic autoType and can
+        # instantiate arbitrary gadget classes straight from the "@type"
+        # property a request can set — fastjson's autoType has been bypassed
+        # repeatedly even with an explicit Class argument, so the official
+        # guidance is to never parse untrusted data with parseObject at all.
+        # Jackson's ObjectMapper is safe by default, but a single-argument
+        # readValue (requires enableDefaultTyping to be meaningful, which is
+        # configured elsewhere) and readValue(payload, Object.class) /
+        # readValue(payload, new TypeReference<...>() {}) deserialize into an
+        # attacker-influenced/polymorphic type and are the classic Jackson
+        # gadget-chain line (CVE-2017-17485 & friends). Branches:
+        #   BR1  JSON(.Object).parseObject(non-literal[, class]) — fastjson
+        #        autoType: any non-literal first argument (variable, request
+        #        accessor, builder concat) is flagged, explicit-Class calls
+        #        included per the fastjson advisory (bypass history).
+        #   BR2  parseObject("literal..." + nonLiteral + ...) — a literal
+        #        JSON prefix concatenated with a variable; same shape as
+        #        R076 BR3's Pattern.compile concat sink.
+        #   BR3  readValue(non-literal) — Jackson single-arg deserialization
+        #        into a runtime type; a bare variable or factory call.
+        #   BR4  readValue(non-literal, Object.class) — polymorphic target.
+        #   BR5  readValue(non-literal, (new )?TypeReference) — a raw/bare
+        #        TypeReference target (TypeReference.INSTANCE, a raw
+        #        `new TypeReference() {}` gradle, a bare constant): the
+        #        target type is unknown/runtime. The typed-safe concrete
+        #        idiom readValue(json, new TypeReference<List<User>>() {})
+        #        stays quiet, as do readValue(json, User.class) reads
+        #        (no default typing), JSON.parse / JSON.parseArray (JS JSON
+        #        collision / list-only), JSON.toJSONString serialization,
+        #        readTree, enableDefaultTyping config lines, declarations,
+        #        and comment / string-literal reproductions (multi-part
+        #        boundary). Java sources are case-sensitive CamelCase, so no
+        #        inline flag; single-line contract.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bJSON(?:Object)?\s*\.\s*parseObject\s*\(\s*"
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)[a-z]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bJSON(?:Object)?\s*\.\s*parseObject\s*\([^)\n]*"
+        r"(?<![\\]Q)['\"]\s*\+\s*"
+        r"(?!['\" ]|\d|[A-Z][A-Z0-9_]{2,}\b)\s*[A-Za-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:[A-Za-z_]\w*(?:\s*\([^)\n]*\))?\s*\.\s*)+"
+        r"readValue\s*\(\s*"
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)[a-z]\w*"
+        r"(?:\(\s*[^)\n]*\)\s*)?\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:[A-Za-z_]\w*(?:\s*\([^)\n]*\))?\s*\.\s*)+"
+        r"readValue\s*\(\s*"
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)[a-z]\w*"
+        r"\s*,\s*Object\s*\.\s*class\b)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:[A-Za-z_]\w*(?:\s*\([^)\n]*\))?\s*\.\s*)+"
+        r"readValue\s*\(\s*"
+        r"(?!['\" ]|new\b|null\b|\d|[A-Z][A-Z0-9_]{2,}\b)[a-z]\w*"
+        r"\s*,\s*(?:new\s+)?TypeReference\b(?!\s*<))",
+        "A Java JSON deserializer is fed a non-literal payload — CWE-502 unsafe deserialization: fastjson JSON.parseObject (autoType honors the request-set '@type' property and instantiates attacker-chosen gadget classes, RCE-prone and repeatedly bypassed even with an explicit class) and Jackson ObjectMapper single-argument readValue / readValue(payload, Object.class) / readValue(payload, raw TypeReference), which deserialize into a polymorphic or runtime target type and are the classic Jackson gadget lines (CVE-2017-17485 et al). Untrusted JSON must be rejected at the boundary or parsed with a fixed, safe schema/format; fastjson should never parse request data, and Jackson should parse into a concrete allow-listed type with default typing disabled. Typed-safe Jackson reads (readValue(json, User.class), readValue(json, new TypeReference<List<User>>() {})), JSON.toJSONString, readTree, declarations and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

@@ -3631,6 +3631,58 @@ def test_javaredos_java_regex_negatives_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R076-javaredos"], issues
 
 
+def test_javajson_json_deserialization_sinks_flagged():
+    """R077-javajson fires when the added line feeds a non-literal payload
+    into a Java JSON deserializer (CWE-502): fastjson JSON.parseObject with
+    any non-literal argument (autoType honors the request-set '@type' and is
+    bypass-prone even with an explicit class), and Jackson ObjectMapper
+    single-argument readValue / readValue(payload, Object.class) /
+    readValue(payload, (new )?TypeReference<...>) polymorphic targets."""
+    src = (
+        'Object o = JSON.parseObject(request.getParameter("json"));\n'
+        'JSON.parseObject(payload);\n'
+        'JSONObject.parseObject(body, User.class);\n'
+        'JSON.parseObject("{\\"@type\\":" + t + "}", Object.class);\n'
+        'Map m = mapper.readValue(input);\n'
+        'objectMapper.readValue(raw);\n'
+        'new ObjectMapper().readValue(userBody);\n'
+        'Object o = mapper.readValue(payload, Object.class);\n'
+        'Object o2 = this.mapper.readValue(body, TypeReference.INSTANCE);\n'
+        'Object v = objectMapper.readValue(resp, TypeReference.INSTANCE);\n'
+        'Object w = mapper.readValue(data, new TypeReference());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R077-javajson"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javajson_json_deserialization_negatives_stay_quiet():
+    """R077-javajson stays quiet for the typed-safe Jackson idiom
+    readValue(json, User.class), string/serialization/inspection calls
+    (JSON.parse, JSON.parseArray, JSON.toJSONString, readTree, convertValue),
+    enableDefaultTyping config lines, JSON keys/values, declarations, and
+    comment/string-literal reproductions."""
+    src = (
+        'User u = mapper.readValue(json, User.class);\n'
+        'List<User> us = mapper.readValue(body, new TypeReference<List<User>>() {});\n'
+        'Object m = JSON.parse(body);\n'
+        'JSONArray a = JSON.parseArray(text);\n'
+        'String s = JSON.toJSONString(user);\n'
+        'JsonNode n = mapper.readTree(payload);\n'
+        'Object v = mapper.convertValue(src, User.class);\n'
+        'mapper.enableDefaultTyping(DefaultTyping.NON_FINAL);\n'
+        'ObjectMapper mapper = new ObjectMapper();\n'
+        'String value = json.get("name");\n'
+        '// JSON.parseObject(request.getParameter("json"));\n'
+        '// mapper.readValue(body, TypeReference.INSTANCE);\n'
+        'String t = "JSON.parseObject(\\"{\\\\");";\n'
+        'String u = "mapper.readValue(input);";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R077-javajson"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -3832,6 +3884,7 @@ def test_every_rule_has_test_exposure():
         "R074-javakeysz",
         "R075-jvachttp",
         "R076-javaredos",
+        "R077-javajson",
     }
     assert exposed <= rids
     uncovered = rids - exposed
