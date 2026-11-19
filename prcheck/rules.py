@@ -3647,6 +3647,44 @@ _RULE_TUPLES = [
         r"\bnew\s+IvParameterSpec\s*\(\s*(?:\b[A-Z][A-Z0-9_]*IV[A-Z0-9_]*\b|\bIV[A-Z0-9_]*\b)\s*\))",
         "A Java AES/CBC-style cipher IV is built from a predictable constant, opening CWE-329 (not using a random IV with cipher block chaining): new IvParameterSpec(new byte[n]) zeroes the IV, new IvParameterSpec(\"...\".getBytes()) hardcodes it in source, and new IvParameterSpec(IV_CONST) reuses one static vector for every record. A fixed/zero IV weakens CBC confidentiality, enables chosen-plaintext watermarking and lets an attacker encrypt chosen data under the same IV to cross-check blocks. Swap a SecureRandom-generated IV (byte[] iv = new byte[16]; new SecureRandom().nextBytes(iv); then new IvParameterSpec(iv)) or use a per-record random IV with the default one-shot init, so each message gets fresh, unpredictable IV bytes. IVs are not secret, but they MUST be unique/unpredictable per encryption — reuse is the vulnerability. Variable IVs (ivBytes/randomIv from SecureRandom), GCMParameterSpec (nonce, authenticated), bare cipher.init(...iv) where the IvParameterSpec came from an earlier line, DECRYPT_MODE driven by a nonce/stored IV, 3-arg IvParameterSpec(byte[], off, len) slices and comment/string-literal reproductions stay quiet",
     ),
+    (
+        # R106-javaredir: Spring MVC controller view-name strings beginning
+        # with the "redirect:" prefix, built by CONCATENATING client-controlled
+        # input at (1) a return statement, (2) a String/var/StringBuilder
+        # view-name assignment, or (3) a <view>.setViewName(...) call.  The
+        # concat operand is either a request accessor result — request/req.
+        # getParameter/getHeader/getRequestURI/getRequestURL/getQueryString(...)
+        # — or a non-literal lowercase variable, so the redirect target is
+        # attacker-influenced and an unvalidated return springs the browser to
+        # an external site (phishing/credential harvesting, CWE-601).  R060
+        # openredir owns the sink-OBJECT forms (sendRedirect/setHeader
+        # Location/RedirectView/RedirectView.setUrl/ModelAndView ctor); this
+        # sibling owns the bare "redirect:" view-name STRING gap R060's
+        # contract leaves open.
+        "R106-javaredir",
+        "security",
+        "high",
+        "Java Spring MVC controller builds a \"redirect:\" view-name string from client-controlled input, then returns it, assigns it, or hands it to setViewName — return \"redirect:\" + request-derived-or-concatenated target (CWE-601)",
+        # OWNED by R106-javaredir: a "redirect:" view-name string concatenated
+        # with a request accessor call ((request|req).getParameter|getHeader|
+        # getRequestURI|getRequestURL|getQueryString(...)) or a non-literal
+        # lowercase variable at a return, a String/var/StringBuilder
+        # assignment, or a setViewName(...) call.  Validate/sanitize the
+        # target or use a server-side whitelist before redirecting.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\breturn\s+[\"']redirect:[^\"'\n]*[\"']\s*\+\s*(?:request|req)\s*\.\s*(?:getParameter|getHeader|getRequestURI|getRequestURL|getQueryString)\s*\([^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\breturn\s+[\"']redirect:[^\"'\n]*[\"']\s*\+\s*(?![\"'\d])[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:String|var|StringBuilder)\s+\w+\s*=\s*[\"']redirect:[^\"'\n]*[\"']\s*\+\s*(?:request|req)\s*\.\s*(?:getParameter|getHeader|getRequestURI|getRequestURL|getQueryString)\s*\([^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:String|var|StringBuilder)\s+\w+\s*=\s*[\"']redirect:[^\"'\n]*[\"']\s*\+\s*(?![\"'\d])[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b\w+\s*\.\s*setViewName\s*\(\s*[\"']redirect:[^\"'\n]*[\"']\s*\+\s*(?:request|req)\s*\.\s*(?:getParameter|getHeader|getRequestURI|getRequestURL|getQueryString)\s*\([^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b\w+\s*\.\s*setViewName\s*\(\s*[\"']redirect:[^\"'\n]*[\"']\s*\+\s*(?![\"'\d])[a-z_]\w*)",
+        "A Java Spring MVC controller builds a \"redirect:\" view-name string from client-controlled input, then returns it, assigns it (String/var/StringBuilder), or passes it to setViewName(...) — a classic CWE-601 open redirect. The \"redirect:\" prefix makes the view resolver issue a 302 to whatever follows it, so an unvalidated request parameter/header value springs the victim's browser to an attacker-chosen external site for phishing, credential harvesting or OAuth-token theft. Validate the target against a server-side whitelist of internal paths (e.g. escape /login, /oauth/authorize callbacks), or build it from an enumerated enum/key instead of echoing raw input; never concatenate request.getParameter/getHeader/getRequestURI/getRequestURL/getQueryString (or a non-literal variable) into the prefix string. Sink-object forms are R060-openredir's domain; literal-only \"redirect:/home\" targets, SCREAMING_SNAKE target constants, response.sendRedirect(...), new ModelAndView(...) and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

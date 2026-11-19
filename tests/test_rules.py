@@ -5118,6 +5118,49 @@ def test_javastativ_variable_or_derived_ivs_stay_quiet():
     ]
 
 
+def test_javaredir_viewname_redirect_flagged():
+    """R106-javaredir flags Spring MVC "redirect:" view-name strings built
+    by concatenating a request accessor result or a non-literal variable at
+    a return statement, a String/var/StringBuilder assignment, or a
+    setViewName() call (CWE-601)."""
+    src = (
+        'return "redirect:" + request.getParameter("next");\n'
+        'return "redirect:/dashboard" + request.getParameter("goto");\n'
+        'return "redirect:" + req.getHeader("Referer");\n'
+        'String target = "redirect:" + request.getParameter("ref");\n'
+        'String view = "redirect:/admin?ret=" + redirectUrl;\n'
+        'return "redirect:" + nextUrl + "?err=1";\n'
+        'mv.setViewName("redirect:" + request.getParameter("page"));\n'
+        'modelView.setViewName("redirect:" + urlParam);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R106-javaredir"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaredir_literal_or_sinkobject_redirects_stay_quiet():
+    """R106-javaredir stays quiet for literal-only "redirect:" targets,
+    SCREAMING_SNAKE constants, R060-openredir sink-object forms
+    (sendRedirect / ModelAndView), and comment/string-literal reproductions."""
+    src = (
+        'return "redirect:/home";\n'
+        'return "view";\n'
+        'return "redirect:" + SUFFIX;\n'
+        'String page = "redirect:/login";\n'
+        'response.sendRedirect("redirect:" + next);\n'
+        'new ModelAndView("redirect:" + nextUrl);\n'
+        '// return "redirect:" + request.getParameter("next");\n'
+        'String s = "\\"redirect:\\" + next";\n'
+        'model.addAttribute("redirect", request.getParameter("next"));\n'
+        'String s = "prefix redirect:" + request.getParameter("next");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R106-javaredir"], [
+        (i.rule_id, i.line, i.snippet) for i in issues if i.rule_id == "R106-javaredir"
+    ]
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -5348,6 +5391,7 @@ def test_every_rule_has_test_exposure():
         "R103-javasessionexp",
         "R104-javabodyread",
         "R105-javastativ",
+        "R106-javaredir",
     }
     assert exposed <= rids
     uncovered = rids - exposed
