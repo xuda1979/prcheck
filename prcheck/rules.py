@@ -2994,6 +2994,45 @@ _RULE_TUPLES = [
         r"\b(?:fileItem|part|multipartFile|upload)\w*\s*\.\s*(?:write|transferTo)\s*\([^)\n]*\b(?:file|part|fileItem|multipartFile|upload|item|attachment)\w*\s*\.\s*(?:getOriginalFilename|getSubmittedFileName|getName)\s*\(\s*\)[^)\n]*\))",
         "Java persists an uploaded file at a path built from the client-supplied filename — CWE-434 unrestricted upload of a file with a dangerous type. fileItem.getName() (Apache Commons FileUpload), part.getSubmittedFileName(), multipartFile.getOriginalFilename() and a generic .getName() on the upload artifact carry the caller-chosen name; when that string reaches a disk-write sink (new File constructor, FileOutputStream/FileWriter/RandomAccessFile, Files.copy/newOutputStream/write/move, fileItem.write/part.write/multipartFile.transferTo) the client controls the stored location and extension: '..' traversal or an absolute path lands the file outside the upload root, and a jsp/jspx/war or other executable extension written under a deployable path yields remote code execution (or an .html/.svg served with inline Content-Disposition enables stored XSS). Distinct from R063-javapath (CWE-22 sinks fed request accessors, '+' concatenations or filename-named variables, with no client-filename getter required) and R089-javazip (archive-entry-named extraction sinks) — this rule owns the client-filename-to-disk-sink upload family only. Never build the destination from the client filename: generate a server-side uuid/random name, validate the real MIME type and extension against an allow-list, keep uploads outside the web root and serve them with Content-Disposition of attachment. Bare getter reads (String name = file.getOriginalFilename()), destinations derived from request accessors or plain variables (R063 domain), stream writes of the original name (out.write(...)), server-derived literal destinations and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R091-javaperm",
+        "security",
+        "high",
+        "Java insecure file permission: world/group-writable mode or ownerOnly=false setters on a File/Path (CWE-732)",
+        # CWE-732 (Incorrect Permission Assignment for Critical Resource):
+        # the sink is a permission-mutating call that grants the file to
+        # everybody — the two-argument File/Path setters with ownerOnly=false
+        # (file.setReadable/setWritable/setExecutable(true, false)),
+        # Files.setPosixFilePermissions / Files.setAttribute fed a permissive
+        # PosixFilePermissions.fromString literal whose "others" group carries
+        # write ('rwxrwxrwx', 'rw-rw-rw-', 'rwxr-xrwx', ...) or an OTHERS_* /
+        # GROUP_* PosixFilePermission enum, Files.create(File|Directory|
+        # Directories) carrying an asFileAttribute from a permissive
+        # fromString literal, or a Runtime.exec'ed chmod to a world-writable
+        # mode (777/0777).  Any local user can then read/tamper with the
+        # critical resource or replace it with a hostile copy.  The
+        # single-argument setters default ownerOnly=true, the two-argument
+        # ownerOnly=true form and the ones that only *remove* world access
+        # (setReadable(false, false)) are the safe side and stay quiet, as do
+        # fromString literals without others-write ('rw-------', 'rwxr-xr-x'),
+        # variable/standard permission lists, directory-safe chmod modes
+        # (644), R053-javaexec's concatenated-command chmod territory, and
+        # comment/string-literal reproductions.  Java sources are
+        # case-sensitive CamelCase, so no inline flag.  Single-line contract.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"[A-Za-z_]\w*\s*\.\s*(?:setReadable|setWritable|setExecutable)\s*\(\s*true\s*,\s*false\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bFiles\s*\.\s*(?:setPosixFilePermissions|setAttribute)\s*\([^)\n]*fromString\s*\(\s*[\"'][rwx-]{6}(?:[rwx-]{2}w|[rwx-]w[rwx-]|w[rwx-]{2})[\"']\s*\)[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bFiles\s*\.\s*setPosixFilePermissions\s*\([^)\n]*(?:OTHERS_READ|OTHERS_WRITE|OTHERS_EXECUTE|GROUP_READ|GROUP_WRITE|GROUP_EXECUTE)[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bRuntime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\([^)\n]*[\"'][^\"'\n]*\bchmod\b[^\"'\n]*\b0?777\b[^\"'\n]*[\"'][^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bRuntime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\([^)\n]*[\"'](?:chmod|0?777)[\"'][^)\n]*[\"'](?:chmod|0?777)[\"'][^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bFiles\s*\.\s*create(?:File|Directory|Directories)\s*\([^)\n]*asFileAttribute\s*\(\s*PosixFilePermissions\s*\.\s*fromString\s*\(\s*[\"'][rwx-]{6}(?:[rwx-]{2}w|[rwx-]w[rwx-]|w[rwx-]{2})[\"']\s*\)\s*\)[^)\n]*\))",
+        "Java exposes a file or directory to every local user — CWE-732 incorrect permission assignment. File/Path setters with the two-argument ownerOnly=false form (file.setReadable(true, false), setWritable/setExecutable), Files.setPosixFilePermissions with a fromString mode whose 'others' group grants write (rwxrwxrwx, rw-rw-rw-), OTHERS_*/GROUP_* PosixFilePermission enums, createFile/createDirectory/createDirectories carrying a permissive asFileAttribute, and exec'd chmod 777/0777 all let any account read, tamper with or delete the artifact (a world-writable keystore, config, cron or web-root entry). Grant the least privilege the resource needs: keep owner-only modes (rw------- / 600 / 700), reach for the ownerOnly=true variants or Files.createFile + asFileAttribute(fromString('rw-------')), and never chmod a sensitive path world-writable. Owner-only single-arg setters, setReadable/setWritable calls that only remove access, 'rwxr-xr-x'-class modes, plain variable permission lists, safe chmod 644, R053-javaexec concatenated-command forms and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

@@ -4278,6 +4278,58 @@ def test_javaupload_safe_or_unrelated_uses_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R090-javaupload"], issues
 
 
+def test_javaperm_insecure_permission_sinks_flagged():
+    """R091-javaperm flags Java permission sinks that expose a file/
+    directory to every local user — CWE-732 incorrect permission assignment."""
+    src = (
+        'file.setReadable(true, false);\n'
+        'log.setWritable(true, false);\n'
+        'f.setExecutable(true, false);\n'
+        'Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rwxrwxrwx"));\n'
+        'Files.setPosixFilePermissions(p, PosixFilePermissions.fromString("rw-rw-rw-"));\n'
+        'Files.setAttribute(p, "posix:permissions", PosixFilePermissions.fromString("rwxrwxrwx"));\n'
+        'Files.setPosixFilePermissions(p, EnumSet.of(PosixFilePermission.OTHERS_READ, PosixFilePermission.OTHERS_WRITE));\n'
+        'Files.setPosixFilePermissions(p, EnumSet.of(PosixFilePermission.GROUP_EXECUTE));\n'
+        'Runtime.getRuntime().exec(new String[]{"chmod", "777", target});\n'
+        'Runtime.getRuntime().exec("chmod 0777 " + path);\n'
+        'Runtime.getRuntime().exec("chmod 777 " + someVar);\n'
+        'Files.createFile(target, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwxrwxrwx")));\n'
+        'Files.createDirectories(dir, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-rw-rw-")));\n'
+        'Files.createDirectory(d, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwxrwxrwx")));\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R091-javaperm"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaperm_safe_or_unrelated_uses_stay_quiet():
+    """R091-javaperm stays quiet for owner-only setters, ownerOnly=true
+    forms, safe rwxr-xr-x / owner-only modes, variable permission lists,
+    chmod 644, concatenated-command chmod boundaries, and comment/string
+    reproductions."""
+    src = (
+        'file.setReadable(true);\n'
+        'file.setWritable(true, true);\n'
+        'file.setExecutable(false, false);\n'
+        'file.setReadable(false);\n'
+        'Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-------"));\n'
+        'Files.setPosixFilePermissions(p, PosixFilePermissions.fromString("rwxr-xr-x"));\n'
+        'EnumSet.of(PosixFilePermission.OWNER_READ);\n'
+        'Files.setAttribute(p, "posix:permissions", perms);\n'
+        'Runtime.getRuntime().exec("chmod 644 " + path);\n'
+        'String s = "file.setReadable(true, false)";\n'
+        '// file.setWritable(true, false)\n'
+        'Files.createFile(target);\n'
+        'file.setLastModified(now);\n'
+        'Files.setPosixFilePermissions(p, EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));\n'
+        'Runtime.getRuntime().exec(new String[]{"ls", "-l", "/tmp"});\n'
+        'String cmd = "chmod 700 " + path;\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R091-javaperm"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4493,6 +4545,7 @@ def test_every_rule_has_test_exposure():
         "R088-javadeserlib",
         "R089-javazip",
         "R090-javaupload",
+        "R091-javaperm",
     }
     assert exposed <= rids
     uncovered = rids - exposed
