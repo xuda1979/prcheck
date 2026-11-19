@@ -2912,6 +2912,29 @@ _RULE_TUPLES = [
         r"[a-z]\w*\s*\.\s*printStackTrace\s*\(\s*(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*getWriter\s*\(\s*\)\s*\))",
         "A Java HTTP response carries exception-internal detail back to the client — CWE-209 generation of an error message containing sensitive information. The server writes e.getMessage()/getLocalizedMessage() (often the underlying SQL/JDBC text, filesystem paths, class names, host names or stack frames that produced the failure) into response.getWriter().print/println/write/append, sends it via response.sendError(code, e.getMessage()), prints a full stack trace to the response writer with e.printStackTrace(response.getWriter()), or returns a Spring @ResponseBody / ResponseEntity body built from the exception message: every one of those details is attacker-invokable by simply triggering the error, and leaks internals that make targeted exploitation (SQL probe feedback, library/framework fingerprinting, EXIF paths) far easier. Distinct from R067-javaxss (request-derived echo, CWE-79), R065-java4xx / R035-hdrinj (header writes, CWE-113), R083-javaopen (request-accessor @ResponseBody/ResponseEntity echo, CWE-116) and R084-javalog / R036-loginj (logging sinks, CWE-532/117) — this rule owns exception-message/stack-trace exposure to the HTTP client only. Log the full exception server-side, return a generic message + a correlation/request id to the client, and in an @ExceptionHandler map known failure types to safe, fixed user-facing texts. Literal/generic error output (\"Something went wrong\"), console/log writes, exception creation/throws without a response sink, header writes, request-derived echoes (R067/R083), and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R088-javadeserlib",
+        "security",
+        "high",
+        "Java deserialization of untrusted payloads via SnakeYAML / XStream / Kryo / Hessian: Yaml.load/loadAs/loadAll, XStream.fromXML/fromXml, Kryo.readClassAndObject, HessianInput/Hessian2Input.readObject fed a request accessor, input stream, or non-literal payload (CWE-502)",
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+Yaml\s*\((?!\s*(?:new\s+(?:\w+\s*\.\s*)*SafeConstructor\b|(?:\w+\s*\.\s*)*SafeLoader\b))[^)\n]*?\)\s*\.\s*(?:load|loadAs|loadAll)\s*\((?!\s*[\"'\d])[^)\n]*?\b[a-z]\w*\b[^)\n]*?\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bYaml\s+[a-z]\w*\s*=\s*new\s+Yaml\s*\((?!\s*(?:new\s+(?:\w+\s*\.\s*)*SafeConstructor\b|(?:\w+\s*\.\s*)*SafeLoader\b))[^)\n]*\)\s*;\s*[a-z]\w*\s*\.\s*(?:load|loadAs|loadAll)\s*\((?!\s*[\"'\d])[^)\n]*?\b[a-z]\w*\b[^)\n]*?\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[a-z]\w*\s*\.\s*(?:load|loadAs|loadAll)\s*\((?:[^)\n]*?(?:[a-z]\w*\s*\([^)\n]*\)|\+\s*[a-z]\w*)[^)\n]*?)\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bXStream\s+[a-z]\w*\s*=\s*new\s+XStream\s*\([^)\n]*\)\s*;\s*[a-z]\w*\s*\.\s*(?:fromXML|fromXml)\s*\((?!\s*[\"'\d])[^)\n]*?\b[a-z]\w*\b[^)\n]*?\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[a-z]\w*\s*\.\s*(?:fromXML|fromXml)\s*\((?!\s*[\"'\d])[^)\n]*?\b[a-z]\w*\b[^)\n]*?\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[a-z]\w*\s*\.\s*readClassAndObject\s*\((?!\s*[\"'\d])[^)\n]*?\b[a-z]\w*\b[^)\n]*?\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+(?:HessianInput|Hessian2Input)\s*\([^)\n]*\b(?:request|req)\b\s*\.\s*[a-z]\w*\s*\([^)\n]*?\)\)\s*\.\s*readObject\s*\(\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:HessianInput|Hessian2Input)\s+[a-z]\w*\s*=\s*new\s+(?:HessianInput|Hessian2Input)\s*\([^)\n]*\b(?:request|req)\b\s*\.\s*[a-z]\w*\s*\([^)\n]*?\)\)\s*;\s*[a-z]\w*\s*\.\s*readObject\s*\(\s*\))",
+        "Java code deserializes an untrusted payload with a third-party library — CWE-502 deserialization of untrusted data. SnakeYAML Yaml.load/loadAs/loadAll, XStream.fromXML/fromXml, Kryo.readClassAndObject and Hessian HessianInput/Hessian2Input.readObject reconstruct attacker-controlled objects; XStream and SnakeYAML (default constructor) in particular allow gadget chains to reach Runtime.exec / file writes / SSRF, and Kryo/Hessian object graphs can carry similar payloads. A non-literal arg — a request accessor (getParameter/getHeader/getQueryString/getInputStream), servlet stream, uploaded content, or any variable holding client/free input — marks the sink: deserializing bytes the client chose lets them pick the gadget class, so the server executes their object graph instead of data. Literal payloads and the SafeConstructor/SafeLoader constructors of SnakeYAML stay quiet. Distinct from R054-javadeser (ObjectInputStream/XMLDecoder), R077-javajson (fastjson/Jackson readValue) and R004 (Python pickle/yaml, CWE-502) — this rule owns the Java third-party deserialization-library sinks only. Prefer allow-listed DTO classes with a strict schema (e.g. Jackson databind with a whitelist, or SnakeYAML constructed with a SafeConstructor), never default-constructed XStream/Kryo/Hessian parsing of client-supplied bytes; reject or deeply sanitize any input that must cross a deserialization boundary. Safe/typed JSON parsing (readValue with a target class), Java-native ObjectInputStream sinks (R054), string-literal/comment reproductions and non-deserialization request echoes stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

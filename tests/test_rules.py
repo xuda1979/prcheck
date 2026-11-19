@@ -4138,6 +4138,51 @@ def test_javaerr_generic_errors_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R087-javaerr"], issues
 
 
+def test_javadeserlib_library_sinks_flagged():
+    """R088-javadeserlib flags SnakeYAML / XStream / Kryo / Hessian
+    deserialization sinks fed non-literal payloads (CWE-502)."""
+    src = (
+        'new Yaml().load(request.getParameter("cfg"));\n'
+        'Yaml yaml = new Yaml(); yaml.load(request.getParameter("cfg"));\n'
+        'yaml.load("user=" + userName);\n'
+        'yaml.loadAs(request.getParameter("type"), User.class);\n'
+        'yaml.loadAll(request.getInputStream());\n'
+        'XStream xstream = new XStream(); xstream.fromXML(requestBody);\n'
+        'xstream.fromXml(rawInput);\n'
+        'kryo.readClassAndObject(request.getInputStream());\n'
+        'new HessianInput(req.getInputStream()).readObject();\n'
+        'Hessian2Input h2 = new Hessian2Input(req.getInputStream()); h2.readObject();\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R088-javadeserlib"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javadeserlib_safe_uses_stay_quiet():
+    """R088-javadeserlib stays quiet for literal payloads, SnakeYAML
+    SafeLoader/SafeConstructor, Python yaml (R004 domain), and the
+    ObjectInputStream (R054) / typed JSON (R077) sibling sinks."""
+    src = (
+        'yaml.load("{a: 1}");\n'
+        'new Yaml().load("{a: 1}");\n'
+        'Yaml safe = new Yaml(new SafeLoader()); safe.load(input);\n'
+        'new Yaml(new SafeConstructor()).load(data);\n'
+        'xstream.fromXML("<a/>");\n'
+        'cfg = yaml.load(text);\n'
+        'safe = yaml.load(stream, Loader=yaml.SafeLoader);\n'
+        'yaml.unsafe_load(text);\n'
+        'User u = objectMapper.readValue(json, User.class);\n'
+        'Object obj = new ObjectInputStream(in).readObject();\n'
+        'HessianInput hi = new HessianInput(clientStream); hi.readObject();\n'
+        'response.getWriter().println(request.getParameter("p"));\n'
+        '// yaml.load(request.getParameter("cfg"))\n'
+        'String s = "yaml.load(request.getParameter(\\"cfg\\"))";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R088-javadeserlib"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4350,6 +4395,7 @@ def test_every_rule_has_test_exposure():
         "R085-javacred",
         "R086-javamail",
         "R087-javaerr",
+        "R088-javadeserlib",
     }
     assert exposed <= rids
     uncovered = rids - exposed
