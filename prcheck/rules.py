@@ -3594,6 +3594,30 @@ _RULE_TUPLES = [
         r"\s*\.\s*setMaxInactiveInterval\s*\(\s*\d{8,}\s*\))",
         "A servlet session's idle timeout is set to a constant that disables or defeats expiration. The servlet spec only auto-invalidates an HttpSession while maxInactiveInterval is positive; a non-positive constant (-1, -60, 0) means the container never times the session out, and a huge constant such as 31536000 (one year) or 86400000 (1000 days) leaves an authenticated session live for months. Either way the session token stays valid far beyond the window the login flow expects, so a stolen or leaked session cookie remains usable indefinitely — insufficient session expiration (CWE-613). Receivers cover the getSession(...) chain on request/req/httpRequest/httpServletRequest and session-typed identifiers (session/httpSession; the sessionId identifier and session.getAttribute() reads stay quiet). Use a short positive interval (300-1800 s), rely on the deployment-config default, and call session.invalidate() explicitly on logout. Only constant arguments fire: positive in-range values (600, 1800, 86400, 604800), arithmetic expressions (30 * 60), variables (setMaxInactiveInterval(max)), session.invalidate(), unguarded getSession() without the sink, hex literals (0x5F5E100), and line-start comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R104-javabodyread",
+        "security",
+        "high",
+        "Java request-body reads and size-unchecked allocations absent any limit: IOUtils/CharStreams.toByteArray/toString/toCharArray/readLines over the request stream/reader, ByteStreams.toByteArray, Spring StreamUtils/FileCopyUtils.copyToByteArray/copyToString/copyToCharArray over request.getInputStream()/getReader(), InputStream.readAllBytes() on the request stream, and new byte[...]/ByteBuffer.allocate sized by request.getContentLength() (CWE-770)",
+        # CWE-770/400 unbounded request-body reads and size-unchecked
+        # allocations OWNED by R104-javabodyread: Apache Commons IOUtils
+        # (toByteArray/toString/toCharArray/readLines) and Guava CharStreams
+        # over request.getInputStream()/getReader(), InputStream.readAllBytes()
+        # on the request stream, Spring StreamUtils/FileCopyUtils original.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:IOUtils|CharStreams)\s*\.\s*(?:toByteArray|toString|toCharArray|readLines)\s*\(\s*(?:request|req|httpRequest|httpServletRequest)\s*\.\s*(?:getInputStream|getReader)\s*\(\s*\)\s*[,)])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:request|req|httpRequest|httpServletRequest)\s*\.\s*getInputStream\s*\(\s*\)\s*\.\s*readAllBytes\s*\(\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:StreamUtils|FileCopyUtils)\s*\.\s*(?:copyToByteArray|copyToString|copyToCharArray)\s*\(\s*(?:request|req|httpRequest|httpServletRequest)\s*\.\s*(?:getInputStream|getReader)\s*\(\s*\)\s*[,)])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bByteStreams\s*\.\s*toByteArray\s*\(\s*(?:request|req|httpRequest|httpServletRequest)\s*\.\s*getInputStream\s*\(\s*\)\s*[,)])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+byte\s*\[\s*(?:request|req|httpRequest|httpServletRequest)\s*\.\s*getContentLength\s*\(\s*\)\s*\])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bByteBuffer\s*\.\s*allocate\s*\(\s*(?:request|req|httpRequest|httpServletRequest)\s*\.\s*getContentLength\s*\(\s*\)\s*\))",
+        "A Java handler pulls the whole HTTP request body into memory — or sizes an allocation from the client-controlled Content-Length — with no cap, opening CWE-770/400 (allocation without limits / uncontrolled resource consumption): Apache Commons IOUtils.toByteArray/toString/toCharArray/readLines and Guava CharStreams/ByteStreams copy helpers over request.getInputStream()/getReader(), Spring StreamUtils/FileCopyUtils.copyToByteArray/copyToString/copyToCharArray, InputStream.readAllBytes() on the request stream, and new byte[request.getContentLength()] / ByteBuffer.allocate(getContentLength()). Content-Length is attacker-controlled (any value up to Integer.MAX_VALUE) and GET/POST bodies can arrive unbounded, so a single request exhausts heap or triggers NegativeArraySizeException — DoS. Cap the read (read into a fixed buffer, use readNBytes(n)/copy() streaming with a max, or reject bodies over a configured limit — request.getContentLength() > MAX → 413 PAYLOAD_TOO_LARGE) before any full-body copy or length-driven allocation. Distinct from deserialization (R054/R088), upload client-filename sinks (R090, CWE-434), zip/XSLT parse-side sinks and DOM/XXE parsers — this rule owns request-body read-copy/readAllBytes/allocation sinks only. Streaming copies (IOUtils.copy), bounded reads (read(buffer)/readNBytes(n)), fixed buffers, capped allocations, variable sources, bare getters, single-line getReader().readLine(), upload artifact streams (R090 domain), non-request streams and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

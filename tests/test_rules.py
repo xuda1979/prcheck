@@ -5020,6 +5020,59 @@ def test_javasessionexp_positive_or_other_operations_stay_quiet():
     ]
 
 
+def test_javabodyread_unbounded_request_read_flagged():
+    """R104-javabodyread flags Java code that pulls the whole HTTP request
+    body into memory or sizes an allocation from the client-controlled
+    Content-Length with no cap (CWE-770): IOUtils/CharStreams
+    toByteArray/toString/toCharArray/readLines over the request
+    stream/reader, ByteStreams.toByteArray, Spring StreamUtils/FileCopyUtils
+    copy helpers, InputStream.readAllBytes() on the request stream, and
+    new byte[...] / ByteBuffer.allocate sized by
+    request.getContentLength()."""
+    src = (
+        'IOUtils.toByteArray(request.getInputStream());\n'
+        'byte[] data = IOUtils.toByteArray(req.getInputStream());\n'
+        'byte[] raw = httpRequest.getInputStream().readAllBytes();\n'
+        'byte[] body = StreamUtils.copyToByteArray(request.getInputStream());\n'
+        'String text = FileCopyUtils.copyToString(request.getReader());\n'
+        'char[] chars = IOUtils.toCharArray(request.getInputStream());\n'
+        'String body = CharStreams.toString(request.getReader());\n'
+        'byte[] buf = new byte[request.getContentLength()];\n'
+        'ByteBuffer buffer = ByteBuffer.allocate(request.getContentLength());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R104-javabodyread"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javabodyread_bounded_or_other_operations_stay_quiet():
+    """R104-javabodyread stays quiet for streaming copies, bounded reads,
+    fixed buffers, capped allocations, bare getters, a single getReader()
+    readLine(), upload artifact streams, non-request streams, and
+    comment/string-literal reproductions."""
+    src = (
+        'IOUtils.copy(request.getInputStream(), out);\n'
+        'IOUtils.toByteArray(someStream);\n'
+        'request.getInputStream().read(buffer);\n'
+        'new byte[1024];\n'
+        'byte[] buf = new byte[Math.min(request.getContentLength(), 1048576)];\n'
+        'int len = request.getContentLength();\n'
+        'request.getReader().readLine();\n'
+        'request.getInputStream().readNBytes(4096);\n'
+        '// IOUtils.toByteArray(request.getInputStream());\n'
+        'String s = "IOUtils.toByteArray(request.getInputStream())";\n'
+        'response.getOutputStream().write(data);\n'
+        'byte[] body = IOUtils.toByteArray(fileItem.getInputStream());\n'
+        'request.getPart("file").getInputStream();\n'
+        'IOUtils.toString(localReader);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R104-javabodyread"], [
+        (i.rule_id, i.line, i.snippet) for i in issues if i.rule_id == "R104-javabodyread"
+    ]
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -5248,6 +5301,7 @@ def test_every_rule_has_test_exposure():
         "R101-javazipgen",
         "R102-javaseed",
         "R103-javasessionexp",
+        "R104-javabodyread",
     }
     assert exposed <= rids
     uncovered = rids - exposed
