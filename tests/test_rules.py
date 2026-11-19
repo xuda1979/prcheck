@@ -4971,6 +4971,55 @@ def test_javaseed_unseeded_or_crypto_safe_stays_quiet():
     ]
 
 
+def test_javasessionexp_disabled_timeout_flagged():
+    """R103-javasessionexp flags Java code that disables or defeats the
+    HttpSession idle timeout (CWE-613): a non-positive constant (<0 or 0)
+    or a huge constant (8+ digits, e.g. 31536000 = one year) passed to
+    setMaxInactiveInterval on the getSession(...) chain or a session-typed
+    receiver."""
+    src = (
+        'request.getSession().setMaxInactiveInterval(-1);\n'
+        'req.getSession().setMaxInactiveInterval(0);\n'
+        'session.setMaxInactiveInterval(-1);\n'
+        'httpSession.setMaxInactiveInterval(-1);\n'
+        'request.getSession(true).setMaxInactiveInterval(-1);\n'
+        'session.setMaxInactiveInterval(31536000);\n'
+        'httpRequest.getSession(false).setMaxInactiveInterval(86400000);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R103-javasessionexp"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javasessionexp_positive_or_other_operations_stay_quiet():
+    """R103-javasessionexp stays quiet for positive in-range intervals,
+    arithmetic/variable arguments, explicit invalidation, unguarded
+    getSession() without the sink, hex literals, other session/cookie
+    operations, the bare method name, and comment/string-literal
+    reproductions."""
+    src = (
+        'request.getSession().setMaxInactiveInterval(1800);\n'
+        'session.setMaxInactiveInterval(86400);\n'
+        'session.setMaxInactiveInterval(30 * 60);\n'
+        'request.getSession().invalidate();\n'
+        'session.setMaxInactiveInterval(600);\n'
+        'session.setMaxInactiveInterval(max);\n'
+        '// request.getSession().setMaxInactiveInterval(-1);\n'
+        'String s = "request.getSession().setMaxInactiveInterval(-1);";\n'
+        'int timeout = -1;\n'
+        'HttpSession session = request.getSession();\n'
+        'response.addCookie(cookie.setMaxAge(0));\n'
+        'session.setMaxInactiveInterval(0x5F5E100);\n'
+        'sessionId = request.getParameter("id");\n'
+        'setMaxInactiveInterval(-1);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R103-javasessionexp"], [
+        (i.rule_id, i.line, i.snippet) for i in issues if i.rule_id == "R103-javasessionexp"
+    ]
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -5198,6 +5247,7 @@ def test_every_rule_has_test_exposure():
         "R100-javaxexp",
         "R101-javazipgen",
         "R102-javaseed",
+        "R103-javasessionexp",
     }
     assert exposed <= rids
     uncovered = rids - exposed

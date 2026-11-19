@@ -3556,6 +3556,44 @@ _RULE_TUPLES = [
         r"\bnew\s+(?:java\.security\.)?SecureRandom\s*\(\s*(?!\s*\))[^)\n]*?\))",
         "A Java pseudo-random generator is given an explicit seed, making the sequence reproducible: new Random(42) / new Random(seed) / rnd.setSeed(42) fix the LCG state for java.util.Random, and new SecureRandom(new byte[]{...}) feeds the SecureRandom constructor a fixed byte array. An attacker who discovers or guesses the seed (a constant, a small int, a field value) can regenerate the entire sequence offline — for this the caller only has to observe one output. Any value minted from a seeded generator therefore loses its unpredictability. Use the no-arg SecureRandom (new SecureRandom(), sr.nextBytes(...)) and never call setSeed on a live generator; for tests use Security.setSeed only on throwaway instances. The SAFE forms stay quiet: unseeded new Random(), unseeded new SecureRandom(), SecureRandom.getInstance(...), time-derived seeds like new Random(System.nanoTime()), R068-javarandom's keyword-before-sink domain, and comment/string-literal reproductions",
     ),
+    (
+        "R103-javasessionexp",
+        "security",
+        "high",
+        "Java session expiration disabled or set to never expire: HttpSession setMaxInactiveInterval with a non-positive (<0 or 0) or huge (>= 10,000,000 s) constant interval (CWE-613)",
+        # CWE-613 insufficient-session-expiration gap OWNED by R103-javasessionexp.
+        # No existing rule touches HttpSession idle-timeouts (R011-session is
+        # Python-only Django/Flask; R048-cookieset scans cookie tokens; R069/
+        # R070 own CSRF and Remember-Me cookie hygiene).  The servlet spec
+        # auto-invalidates a session only while maxInactiveInterval is positive,
+        # so a non-positive constant (-1, -60, 0) disables the timeout entirely
+        # and a huge constant (31536000 = one year, any 8+ digit interval)
+        # leaves an authenticated session live for months — both extend the
+        # token's usable window well past the app's expectation (CWE-613).
+        # Two branches, each opened by the shared (?<!...) comment/string guard
+        # and closed by its PREFIX-group ):
+        #   BR1 <session receiver>.setMaxInactiveInterval(non-positive const)
+        #       receiver = request.getSession(<bool>) chain or a session-typed
+        #       identifier (session since the method is HttpSession-only);
+        #       NEGZERO = -0*[1-9]\d* (any negative, -1/-60/-600) or 0
+        #   BR2 <session receiver>.setMaxInactiveInterval(huge const)
+        #       8+ decimal digits, e.g. 31536000 / 86400000 / 100000000
+        # Only CONSTANT arguments fire; positive in-range values (600, 1800,
+        # 86400, 604800), arithmetic expressions (30 * 60, 60 * 60 * 24),
+        # variables (setMaxInactiveInterval(max)), session.invalidate(),
+        # unguarded getSession() without the sink, hex literals (0x5F5E100)
+        # and line-start comment/string reproductions stay quiet.  No inline
+        # flag (Java CamelCase).  Single-line contract.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:(?:request|req|httpRequest|httpServletRequest)\s*\.\s*getSession\s*\(\s*[^)\n]*?\)"
+        r"|(?:session(?![Ii]d\w*)\w*|httpSession\w*))"
+        r"\s*\.\s*setMaxInactiveInterval\s*\(\s*(?:-0*[1-9]\d*|0)\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:(?:request|req|httpRequest|httpServletRequest)\s*\.\s*getSession\s*\(\s*[^)\n]*?\)"
+        r"|(?:session(?![Ii]d\w*)\w*|httpSession\w*))"
+        r"\s*\.\s*setMaxInactiveInterval\s*\(\s*\d{8,}\s*\))",
+        "A servlet session's idle timeout is set to a constant that disables or defeats expiration. The servlet spec only auto-invalidates an HttpSession while maxInactiveInterval is positive; a non-positive constant (-1, -60, 0) means the container never times the session out, and a huge constant such as 31536000 (one year) or 86400000 (1000 days) leaves an authenticated session live for months. Either way the session token stays valid far beyond the window the login flow expects, so a stolen or leaked session cookie remains usable indefinitely — insufficient session expiration (CWE-613). Receivers cover the getSession(...) chain on request/req/httpRequest/httpServletRequest and session-typed identifiers (session/httpSession; the sessionId identifier and session.getAttribute() reads stay quiet). Use a short positive interval (300-1800 s), rely on the deployment-config default, and call session.invalidate() explicitly on logout. Only constant arguments fire: positive in-range values (600, 1800, 86400, 604800), arithmetic expressions (30 * 60), variables (setMaxInactiveInterval(max)), session.invalidate(), unguarded getSession() without the sink, hex literals (0x5F5E100), and line-start comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
