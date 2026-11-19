@@ -4389,6 +4389,60 @@ def test_javaexcept_handled_exceptions_and_non_java_quiet():
     assert not [i for i in issues if i.rule_id == "R092-javaexcept"], issues
 
 
+def test_javajndi_interpolated_or_variable_lookups_flagged():
+    """R093-javajndi flags JNDI Context.lookup() calls fed an interpolated,
+    request-derived or variable name — CWE-74 injection via a JNDI name an
+    attacker could influence to redirect the lookup to a hostile registry."""
+    src = (
+        'Object bean = new InitialContext(env).lookup("java:/" + userInput);\n'
+        'Object obj = new InitialDirContext(props).lookup("ldap://" + host + "/" + user);\n'
+        'Object svc = new InitialContext(env).lookup(req.getParameter("jndiName"));\n'
+        'Object x = new InitialContext().lookup(builder.build());\n'
+        'Object x = new InitialContext().lookup(url);\n'
+        'Object o = ctx.lookup("java:global/" + beanName);\n'
+        'Object o = context.lookup("cn=" + userDn);\n'
+        'jndiContext.lookup(request.getParameter("lookupName"));\n'
+        'Object o = dirContext.lookup(bindName);\n'
+        'Object o = jndiTemplate.lookup("java:/" + jndiName);\n'
+        'Object o = new JndiTemplate(props).lookup(userInput);\n'
+        'Object o = dirContext.lookup(getServiceName());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R093-javajndi"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javajndi_literal_constant_or_unrelated_uses_stay_quiet():
+    """R093-javajndi stays quiet for standard literal java:comp/env/... and
+    constant-name lookups, non-JNDI receivers (map/service/logger), traversal
+    reads, and comment/string-literal reproductions."""
+    src = (
+        'Object o = new InitialContext().lookup("java:comp/env/jdbc/MyDS");\n'
+        'DataSource ds = (DataSource) new InitialDirContext().lookup(DB_NAME);\n'
+        'Object o = context.lookup("java:comp/env/jdbc/MyDS");\n'
+        'context.lookup(SOME_CONSTANT);\n'
+        'jndiTemplate.lookup(DB_NAME);\n'
+        'String s = nameService.lookup();\n'
+        'Object o = m.lookup(key);\n'
+        'Object o = lookup("java:comp/env/SVC");\n'
+        'String k = map.lookup("a" + i);\n'
+        'Object o = service.lookup(id);\n'
+        'logger.lookup(key);\n'
+        '// ctx.lookup("java:comp/env/jdbc/ds");\n'
+        '/* ctx.lookup(name); */\n'
+        'String s = "ctx.lookup(\\"java:comp/env/jdbc/ds\\")";\n'
+        'Object o = new InitialContext().lookup(CONFIG_URL);\n'
+        'ctx.lookup(X);\n'
+        'user = request.get("name");\n'
+        'Enumeration<String> names = dirContext.listBindings("");\n'
+        'dirContext.list("java:comp/env");\n'
+        'context.lookup("java:comp/env/" + DB_NAME);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R093-javajndi"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4606,6 +4660,7 @@ def test_every_rule_has_test_exposure():
         "R090-javaupload",
         "R091-javaperm",
         "R092-javaexcept",
+        "R093-javajndi",
     }
     assert exposed <= rids
     uncovered = rids - exposed

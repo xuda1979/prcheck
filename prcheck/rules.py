@@ -3066,6 +3066,46 @@ _RULE_TUPLES = [
         r"\bcatch\s*\([^)\n]*\)\s*\{\s*\breturn\s*(?:null|false|0|true)?\s*;\s*\}\s*)",
         "Java silently swallows an exception — CWE-390 detection of error condition without action (and the CWE-248 / CWE-703 / CWE-754 siblings). A catch block with an empty or comment-only body ('catch (Exception e) {}', '/* ignored */', '// not really handled'), a body whose only statement is e.printStackTrace() to stderr before falling through, or a body that returns a literal default (null/false/0/true, bare 'return;') makes the program 'succeed' as if the guarded operation had worked. For security-relevant operations — authentication, signature/crypto verification, decryption of untrusted input, config/secret loading, remote calls — the masked failure then flows into authorization and business logic as a null or success value, and the incident is invisible in the error path. Catch every failure and take real action: rethrow/wrap (throw new ServiceException('…', e)), record the exception object with a real logger (log.error('…', e)), return Optional.empty() or a deliberate computed fallback, clean up and propagate a status. Blocks that act on the exception (rethrow, log-with-cause, cleanup, interrupt()), leak detail to the response writer (R087-javaerr), Python except-swallowing (B001) and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R093-javajndi",
+        "security",
+        "high",
+        "Java JNDI lookup() called with an interpolated, variable or request-derived name (CWE-74)",
+        # CWE-74 (Injection) / JNDI injection: the sink is a Context.lookup()
+        # (or InitialContext|InitialDirContext|InitialLdapContext|JndiTemplate
+        # construction chained to .lookup()) whose JNDI name is not a fixed
+        # literal — a quoted prefix concatenated with a variable ('java:/' +
+        # userInput, 'ldap://' + host + '/' + user), a request accessor result
+        # (req.getParameter/getHeader/getQueryString/getRequestURI/getPathInfo),
+        # a builder/.toString() or handler-method chain, or a bare variable.
+        # The name selects which LDAP/RMI/IIOP registry entry to resolve, so an
+        # attacker who can influence it can point the lookup at a registry they
+        # control — the JNDI-name-to-RCE vector family log4shell popularized.
+        # Standard fixed lookups stay quiet: literal "java:comp/env/..." names,
+        # SCREAMING_SNAKE constants and uppercase config variables, receivers
+        # that are not clearly a JNDI context (map/service/logger lookups),
+        # plain list/listBindings traversal reads, and comment/string-literal
+        # reproductions.  Distinct from R061-ldapjndi (LDAP/Spring-LDAP search
+        # filter and base-DN injection, CWE-90 — owns .search() and friends, no
+        # .lookup() coverage), R075-jvachttp (cleartext ldap:// scheme literals
+        # in env.put/InitialDirContext ctors only), R064-javareflect
+        # (Class.forName/loadClass class-name lookups), and the R054-javadeser /
+        # R088 / R077 deserialization families (CWE-502/917).  Java sources are
+        # case-sensitive CamelCase, so no inline flag.  Single-line contract.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+(?:InitialContext|InitialDirContext|InitialLdapContext|JndiTemplate)\s*\([^)\n]*\)\)?\s*\.\s*lookup\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+(?:InitialContext|InitialDirContext|InitialLdapContext|JndiTemplate)\s*\([^)\n]*\)\)?\s*\.\s*lookup\s*\([^)\n]*(?:request|req)\w*\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getPathInfo)\s*\([^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+(?:InitialContext|InitialDirContext|InitialLdapContext|JndiTemplate)\s*\([^)\n]*\)\)?\s*\.\s*lookup\s*\(\s*[a-z_]\w*(?:\.\w+\s*\([^)\n]*\))?(?:\([^)\n]*\))?\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:ctx|ctxt|context|jndiCtx|jndiContext|dirCtx|dirContext|ldapCtx|ldapContext|initialContext|initialDirContext|jndiTemplate)\w*\s*\.\s*lookup\s*\([^)\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:ctx|ctxt|context|jndiCtx|jndiContext|dirCtx|dirContext|ldapCtx|ldapContext|initialContext|initialDirContext|jndiTemplate)\w*\s*\.\s*lookup\s*\([^)\n]*(?:request|req)\w*\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getPathInfo)\s*\([^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:ctx|ctxt|context|jndiCtx|jndiContext|dirCtx|dirContext|ldapCtx|ldapContext|initialContext|initialDirContext|jndiTemplate)\w*\s*\.\s*lookup\s*\(\s*[a-z_]\w*(?:\.\w+\s*\([^)\n]*\))?(?:\([^)\n]*\))?\s*\))",
+        "Java resolves a JNDI name built from or influenced by client input — CWE-74 injection via Context.lookup(). new InitialContext(...).lookup(...) / InitialDirContext / InitialLdapContext / JndiTemplate lookups, and ctx/context/jndiContext/dirContext/ldapContext/... .lookup(...), whose name is a quoted prefix concatenated with a variable ('java:/' + userInput, 'cn=' + userDn, 'ldap://' + host + '/' + user), a request accessor result (req.getParameter/getHeader/getQueryString/...), a builder/.toString() or handler-method chain, or a bare variable. The JNDI name picks the LDAP/RMI/IIOP registry entry to resolve; a name an attacker controls lets them substitute a registry they own and pull attacker-supplied classes into the application server — the JNDI-injection-to-RCE mechanism behind log4shell and countless CVE lists. Treat names from the request, or assembled from anything user-influenced, as untrusted: validate against an allowlist of known good names, keep java:/ or java:comp/env/ prefixes with the exact catalogued entry as a literal, and never concatenate request data into the name. Literal java:comp/env/... lookups, SCREAMING_SNAKE constants and uppercase config variables, non-JNDI receivers (map/service/logger lookup), list/listBindings reads, LDAP search-filter injection (R061-ldapjndi), cleartext scheme literals (R075-jvachttp), class-name lookups (R064-javareflect) and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
