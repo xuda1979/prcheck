@@ -2935,6 +2935,35 @@ _RULE_TUPLES = [
         r"\b(?:HessianInput|Hessian2Input)\s+[a-z]\w*\s*=\s*new\s+(?:HessianInput|Hessian2Input)\s*\([^)\n]*\b(?:request|req)\b\s*\.\s*[a-z]\w*\s*\([^)\n]*?\)\)\s*;\s*[a-z]\w*\s*\.\s*readObject\s*\(\s*\))",
         "Java code deserializes an untrusted payload with a third-party library — CWE-502 deserialization of untrusted data. SnakeYAML Yaml.load/loadAs/loadAll, XStream.fromXML/fromXml, Kryo.readClassAndObject and Hessian HessianInput/Hessian2Input.readObject reconstruct attacker-controlled objects; XStream and SnakeYAML (default constructor) in particular allow gadget chains to reach Runtime.exec / file writes / SSRF, and Kryo/Hessian object graphs can carry similar payloads. A non-literal arg — a request accessor (getParameter/getHeader/getQueryString/getInputStream), servlet stream, uploaded content, or any variable holding client/free input — marks the sink: deserializing bytes the client chose lets them pick the gadget class, so the server executes their object graph instead of data. Literal payloads and the SafeConstructor/SafeLoader constructors of SnakeYAML stay quiet. Distinct from R054-javadeser (ObjectInputStream/XMLDecoder), R077-javajson (fastjson/Jackson readValue) and R004 (Python pickle/yaml, CWE-502) — this rule owns the Java third-party deserialization-library sinks only. Prefer allow-listed DTO classes with a strict schema (e.g. Jackson databind with a whitelist, or SnakeYAML constructed with a SafeConstructor), never default-constructed XStream/Kryo/Hessian parsing of client-supplied bytes; reject or deeply sanitize any input that must cross a deserialization boundary. Safe/typed JSON parsing (readValue with a target class), Java-native ObjectInputStream sinks (R054), string-literal/comment reproductions and non-deserialization request echoes stay quiet",
     ),
+    (
+        "R089-javazip",
+        "security",
+        "high",
+        "Java zip-slip: archive extraction writes an entry to a path derived from entry.getName() or opens a request-fed ZipInputStream/JarInputStream, letting a crafted entry name escape the extraction directory (CWE-22)",
+        # CWE-22 zip-slip variant: the getNextEntry/getNextJarEntry loop or
+        # ZipFile iteration is the sink only when the entry's name reaches a
+        # path/write constructor (new File(...), Files.copy/write/
+        # newOutputStream/createDirectories, Paths.get(...).resolve(...)) or a
+        # '...' + entry.getName() concatenation, so a malicious entry named
+        # "../../evil.jsp" writes outside the sandbox.  Reading the archive
+        # stream straight off the request (new ZipInputStream(
+        # request.getInputStream())) is flagged directly.  Generic
+        # entry.getName() reads, getEntry lookups, extraction loops without a
+        # write sink, comments and string literals stay quiet.  Java sources
+        # are case-sensitive CamelCase, so no inline flag.  Single-line
+        # contract.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+File\s*\([^)\n]*\b(?:entry|ze|jarEntry)\w*\s*\.\s*getName\s*\(\s*\)\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bFiles\s*\.\s*(?:copy|write|newOutputStream|createDirectories)\s*\([^)\n]*\b(?:entry|ze|jarEntry)\w*\s*\.\s*getName\s*\(\s*\)[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bPaths\s*\.\s*get\s*\([^)\n]*\)\s*\.\s*resolve\s*\(\s*(?:entry|ze|jarEntry)\w*\s*\.\s*getName\s*\(\s*\)\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"[\"']\s*\+\s*(?:entry|ze|jarEntry)\w*\s*\.\s*getName\s*\(\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+(?:ZipInputStream|JarInputStream)\s*\([^)\n]*(?:request|req)\b\s*\.\s*getInputStream\s*\([^)\n]*\)\s*\))",
+        "A Java archive-extraction routine resolves the output path from the entry name — CWE-22 zip-slip (path traversal via crafted archive entries). When ZipInputStream.getNextEntry()/JarInputStream.getNextJarEntry() or a ZipFile entry loop writes each entry with new File(baseDir, entry.getName()), Files.copy/write/newOutputStream/createDirectories over Paths.get(...).resolve(entry.getName()), or a '...' + entry.getName() concatenation, an attacker-supplied archive entry named '../' or absolute (e.g. '../../../../tmp/evil.jsp', '/etc/cron.d/x') escapes the extraction directory: arbitrary file write, overwrite of configs/keystores or code drop into a deployable location. Opening the archive directly off the request (new ZipInputStream(request.getInputStream())) is flagged too since the attacker controls every entry name. Distinct from R063-javapath (File/Files/upload-write sinks fed request accessors or concatenations, no archive-entry naming) — this rule owns the archive-entry-named extraction sinks only. Validate every entry name against a strict allow-list with the archive's base dir prefix, reject names containing '..' or a leading '/', resolve the target with toRealPath() and ensure it stays under the extraction root, and cap the total/uncompressed size while iterating. Generic entry.getName() reads without a path sink, ZipFile.getEntry() lookups, in-memory archive reads of a literal filename (R063 domain), comment/string-literal reproductions and non-archive file-path sinks stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

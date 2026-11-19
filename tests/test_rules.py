@@ -4183,6 +4183,52 @@ def test_javadeserlib_safe_uses_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R088-javadeserlib"], issues
 
 
+def test_javazip_extraction_sinks_flagged():
+    """R089-javazip flags archive-extraction sinks whose target path is
+    derived from the entry name (zip-slip, CWE-22) plus archives opened
+    straight off the request."""
+    src = (
+        'Path p = Paths.get(root).resolve(entry.getName());\n'
+        'new File(dir, entry.getName());\n'
+        'File out = new File(savePath + "/" + ze.getName());\n'
+        'Files.copy(in, outDir + "/" + jarEntry.getName());\n'
+        'Files.newOutputStream(dest.resolve(entry.getName()));\n'
+        'String out = base + ".." + ze.getName();\n'
+        'String file = dir + ".." + entry.getName();\n'
+        'new ZipInputStream(request.getInputStream());\n'
+        'JarInputStream jin = new JarInputStream(req.getInputStream());\n'
+        'Path target = Paths.get(baseDir).resolve(jarEntry.getName());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R089-javazip"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javazip_safe_uses_stay_quiet():
+    """R089-javazip stays quiet for generic entry-name reads, literal
+    extraction paths, archive reads of server-side files (not the request),
+    and the sibling R063-javapath sinks with non-entry variables."""
+    src = (
+        'ZipEntry ze = zin.getNextEntry();\n'
+        'String name = ze.getName();\n'
+        'byte[] data = readAll(ze);\n'
+        'new File(dir, "safe.txt");\n'
+        'Files.copy(in, Paths.get("out"));\n'
+        'Paths.get(base).resolve("entry.txt");\n'
+        'ZipInputStream zin = new ZipInputStream(new FileInputStream(path));\n'
+        'new JarInputStream(new File(path));\n'
+        'while (zin.getNextEntry() != null) { read(zin); }\n'
+        'String safe = outDir + "/" + fileName;\n'
+        '// new File(dir, entry.getName())\n'
+        'String s = "new File(dir, entry.getName())";\n'
+        'response.getWriter().println(entry.getName());\n'
+        'out.write(ze.getName().getBytes());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R089-javazip"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4396,6 +4442,7 @@ def test_every_rule_has_test_exposure():
         "R086-javamail",
         "R087-javaerr",
         "R088-javadeserlib",
+        "R089-javazip",
     }
     assert exposed <= rids
     uncovered = rids - exposed
