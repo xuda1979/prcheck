@@ -4229,6 +4229,55 @@ def test_javazip_safe_uses_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R089-javazip"], issues
 
 
+def test_javaupload_client_filename_disk_sink_flagged():
+    """R090-javaupload flags Java file-upload sinks that write to a path
+    built from the client-supplied filename (fileItem.getName(),
+    part.getSubmittedFileName()/getOriginalFilename(),
+    multipartFile.getOriginalFilename()) — CWE-434 unrestricted upload."""
+    src = (
+        'File f = new File(uploadDir, file.getOriginalFilename());\n'
+        'File target = new File(savePath, fileItem.getName());\n'
+        'new FileOutputStream(uploadPath + item.getName());\n'
+        'new FileWriter(destination + part.getSubmittedFileName());\n'
+        'RandomAccessFile raf = new RandomAccessFile(store + upload.getOriginalFilename(), "rw");\n'
+        'Files.copy(in, Paths.get(dir).resolve(part.getSubmittedFileName()));\n'
+        'Files.newOutputStream(Paths.get(base).resolve(fileItem.getName()));\n'
+        'Files.write(Paths.get(outDir).resolve(multipartFile.getOriginalFilename()), data);\n'
+        'multipartFile.transferTo(new File(dir, multipartFile.getOriginalFilename()));\n'
+        'fileItem.write(directory + "/" + file.getOriginalFilename());\n'
+        'part.write(new File(uploadDir, part.getSubmittedFileName()));\n'
+        'File g = new File(dir, attachment.getName());\n'
+        'Files.move(Paths.get(tmp).resolve(item.getOriginalFilename()), dest);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R090-javaupload"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaupload_safe_or_unrelated_uses_stay_quiet():
+    """R090-javaupload stays quiet for bare getter reads, destinations
+    derived from request accessors or plain variables (R063 domain), stream
+    writes of the original name, literal destinations, and comment/string
+    reproductions."""
+    src = (
+        'String original = file.getOriginalFilename();\n'
+        'multipartFile.transferTo(new File(uploadDir, generatedName));\n'
+        'new File(dir, request.getParameter("fileName"));\n'
+        'fileItem.getName();\n'
+        'out.write(file.getOriginalFilename().getBytes());\n'
+        '// new File(dir, file.getOriginalFilename())\n'
+        'String s = "new File(dir, file.getOriginalFilename())";\n'
+        'Paths.get(dir).resolve(fileName);\n'
+        'File copy = new File(dir, entry.getName());\n'
+        'item.transferTo(new File(uploadDir, "fixed.bin"));\n'
+        'FileOutputStream fos = new FileOutputStream(savedPath);\n'
+        'String newName = renameFile(file.getSubmittedFileName());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R090-javaupload"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4443,6 +4492,7 @@ def test_every_rule_has_test_exposure():
         "R087-javaerr",
         "R088-javadeserlib",
         "R089-javazip",
+        "R090-javaupload",
     }
     assert exposed <= rids
     uncovered = rids - exposed

@@ -2964,6 +2964,36 @@ _RULE_TUPLES = [
         r"\bnew\s+(?:ZipInputStream|JarInputStream)\s*\([^)\n]*(?:request|req)\b\s*\.\s*getInputStream\s*\([^)\n]*\)\s*\))",
         "A Java archive-extraction routine resolves the output path from the entry name — CWE-22 zip-slip (path traversal via crafted archive entries). When ZipInputStream.getNextEntry()/JarInputStream.getNextJarEntry() or a ZipFile entry loop writes each entry with new File(baseDir, entry.getName()), Files.copy/write/newOutputStream/createDirectories over Paths.get(...).resolve(entry.getName()), or a '...' + entry.getName() concatenation, an attacker-supplied archive entry named '../' or absolute (e.g. '../../../../tmp/evil.jsp', '/etc/cron.d/x') escapes the extraction directory: arbitrary file write, overwrite of configs/keystores or code drop into a deployable location. Opening the archive directly off the request (new ZipInputStream(request.getInputStream())) is flagged too since the attacker controls every entry name. Distinct from R063-javapath (File/Files/upload-write sinks fed request accessors or concatenations, no archive-entry naming) — this rule owns the archive-entry-named extraction sinks only. Validate every entry name against a strict allow-list with the archive's base dir prefix, reject names containing '..' or a leading '/', resolve the target with toRealPath() and ensure it stays under the extraction root, and cap the total/uncompressed size while iterating. Generic entry.getName() reads without a path sink, ZipFile.getEntry() lookups, in-memory archive reads of a literal filename (R063 domain), comment/string-literal reproductions and non-archive file-path sinks stay quiet",
     ),
+    (
+        "R090-javaupload",
+        "security",
+        "high",
+        "Java unrestricted file upload: client-supplied filename (fileItem.getName(), part.getSubmittedFileName()/getOriginalFilename(), multipartFile.getOriginalFilename()) forwarded into a disk-write sink, letting the caller choose the stored path/extension (CWE-434)",
+        # CWE-434 (Unrestricted Upload of File with Dangerous Type): the
+        # sink is a disk write whose destination embeds a client-filename
+        # getter — fileItem.getName(), part.getSubmittedFileName() /
+        # getOriginalFilename(), multipartFile.getOriginalFilename() (and a
+        # generic .getName() on the upload artifact object) appearing inside
+        # new File(...), a FileOutputStream/FileWriter/RandomAccessFile
+        # constructor, Files.copy/newOutputStream/write/move, or
+        # fileItem.write / part.write / multipartFile.transferTo.  The
+        # client picks the stored name, so a traversal
+        # ('../../webapp/WEB-INF/x.jsp') or a dangerous extension lands
+        # anywhere on disk.  Bare getter reads, request-accessor and
+        # plain-variable destinations (R063 domain), stream writes
+        # (out.write), and R089-style archive entry-name sinks stay quiet.
+        # Java sources are case-sensitive CamelCase, so no inline flag.
+        # Single-line contract.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+File\s*\([^)\n]*\b(?:file|part|fileItem|multipartFile|upload|item|attachment)\w*\s*\.\s*(?:getOriginalFilename|getSubmittedFileName|getName)\s*\(\s*\)\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+(?:FileOutputStream|FileWriter|RandomAccessFile)\s*\([^)\n]*\b(?:file|part|fileItem|multipartFile|upload|item|attachment)\w*\s*\.\s*(?:getOriginalFilename|getSubmittedFileName|getName)\s*\(\s*\)[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bFiles\s*\.\s*(?:copy|newOutputStream|write|move)\s*\([^)\n]*Paths\s*\.\s*get\s*\([^)\n]*\)\s*\.\s*resolve\s*\(\s*(?:file|part|fileItem|multipartFile|upload|item|attachment)\w*\s*\.\s*(?:getOriginalFilename|getSubmittedFileName|getName)\s*\(\s*\)\s*\)[^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:fileItem|part|multipartFile|upload)\w*\s*\.\s*(?:write|transferTo)\s*\([^)\n]*\b(?:file|part|fileItem|multipartFile|upload|item|attachment)\w*\s*\.\s*(?:getOriginalFilename|getSubmittedFileName|getName)\s*\(\s*\)[^)\n]*\))",
+        "Java persists an uploaded file at a path built from the client-supplied filename — CWE-434 unrestricted upload of a file with a dangerous type. fileItem.getName() (Apache Commons FileUpload), part.getSubmittedFileName(), multipartFile.getOriginalFilename() and a generic .getName() on the upload artifact carry the caller-chosen name; when that string reaches a disk-write sink (new File constructor, FileOutputStream/FileWriter/RandomAccessFile, Files.copy/newOutputStream/write/move, fileItem.write/part.write/multipartFile.transferTo) the client controls the stored location and extension: '..' traversal or an absolute path lands the file outside the upload root, and a jsp/jspx/war or other executable extension written under a deployable path yields remote code execution (or an .html/.svg served with inline Content-Disposition enables stored XSS). Distinct from R063-javapath (CWE-22 sinks fed request accessors, '+' concatenations or filename-named variables, with no client-filename getter required) and R089-javazip (archive-entry-named extraction sinks) — this rule owns the client-filename-to-disk-sink upload family only. Never build the destination from the client filename: generate a server-side uuid/random name, validate the real MIME type and extension against an allow-list, keep uploads outside the web root and serve them with Content-Disposition of attachment. Bare getter reads (String name = file.getOriginalFilename()), destinations derived from request accessors or plain variables (R063 domain), stream writes of the original name (out.write(...)), server-derived literal destinations and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
