@@ -5161,6 +5161,54 @@ def test_javaredir_literal_or_sinkobject_redirects_stay_quiet():
     ]
 
 
+def test_javapbeparm_weak_pbe_parameters_flagged():
+    """R107-javapbeparm flags Java PBE parameter construction with a weak,
+    constant iteration count (below the NIST SP 800-132 minimum of 10,000) or
+    a short salt literal (new byte[n], n < 16) at a PBEKeySpec /
+    PBEParameterSpec (CWE-916)."""
+    src = (
+        'PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), new byte[8], 1000);\n'
+        'PBEKeySpec pbe = new PBEKeySpec(pw, new byte[4], 100);\n'
+        'new PBEParameterSpec(salt, 1000);\n'
+        'new PBEParameterSpec(new byte[8], 1000);\n'
+        'PBEKeySpec k = new PBEKeySpec(pass, new byte[16], 1000);\n'
+        'new PBEParameterSpec(saltBytes, 10);\n'
+        'new PBEKeySpec(pw, new byte[8], 100000);\n'
+        'PBEParameterSpec ps = new PBEParameterSpec(new byte[4], 100000);\n'
+        'pbeSpec = new PBEParameterSpec(salt, 0);\n'
+        'this.keySpec = new PBEKeySpec(passphrase.toCharArray(), saltBytes, 9000, 128);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R107-javapbeparm"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javapbeparm_adequate_or_variable_pbe_params_stay_quiet():
+    """R107-javapbeparm stays quiet for adequate constants (>= 10,000
+    iterations, new byte[n] with n >= 16 salts), variable iteration/salt
+    arguments, adaptive-KDF configs, R082/R066-domain forms, and
+    comment/string-literal reproductions."""
+    src = (
+        'PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), new byte[16], 100000);\n'
+        'new PBEParameterSpec(salt, 100000);\n'
+        'new PBEKeySpec(pw, new byte[16], 10000);\n'
+        'new PBEKeySpec("hardcoded".toCharArray());\n'
+        'SecretKeyFactory f = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");\n'
+        'new PBEKeySpec(pw, saltBytes, iterationCount);\n'
+        'new PBEParameterSpec(new byte[16], iterationCount);\n'
+        '// new PBEKeySpec(pw, new byte[8], 1000);\n'
+        'String s = "new PBEKeySpec(pw, new byte[8], 1000)";\n'
+        'new PBEParameterSpec(new byte[16], 100000);\n'
+        'Cipher c = Cipher.getInstance("PBEWITHMD5ANDDES");\n'
+        'new PBEKeySpec("hardcoded".toCharArray(), new byte[16], 100000);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R107-javapbeparm"], [
+        (i.rule_id, i.line, i.snippet) for i in issues if i.rule_id == "R107-javapbeparm"
+    ]
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -5392,6 +5440,7 @@ def test_every_rule_has_test_exposure():
         "R104-javabodyread",
         "R105-javastativ",
         "R106-javaredir",
+        "R107-javapbeparm",
     }
     assert exposed <= rids
     uncovered = rids - exposed

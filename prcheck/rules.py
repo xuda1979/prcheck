@@ -3685,6 +3685,32 @@ _RULE_TUPLES = [
         r"\b\w+\s*\.\s*setViewName\s*\(\s*[\"']redirect:[^\"'\n]*[\"']\s*\+\s*(?![\"'\d])[a-z_]\w*)",
         "A Java Spring MVC controller builds a \"redirect:\" view-name string from client-controlled input, then returns it, assigns it (String/var/StringBuilder), or passes it to setViewName(...) — a classic CWE-601 open redirect. The \"redirect:\" prefix makes the view resolver issue a 302 to whatever follows it, so an unvalidated request parameter/header value springs the victim's browser to an attacker-chosen external site for phishing, credential harvesting or OAuth-token theft. Validate the target against a server-side whitelist of internal paths (e.g. escape /login, /oauth/authorize callbacks), or build it from an enumerated enum/key instead of echoing raw input; never concatenate request.getParameter/getHeader/getRequestURI/getRequestURL/getQueryString (or a non-literal variable) into the prefix string. Sink-object forms are R060-openredir's domain; literal-only \"redirect:/home\" targets, SCREAMING_SNAKE target constants, response.sendRedirect(...), new ModelAndView(...) and comment/string-literal reproductions stay quiet",
     ),
+    (
+        # R107-javapbeparm: Java PBE parameter construction with insufficient
+        # computational effort (CWE-916).  Fires when a PBEKeySpec(char[]
+        # password, byte[] salt, int iterationCount[, int keyLength]) or
+        # PBEParameterSpec(byte[] salt, int iterationCount[, ...]) is built
+        # with a CONSTANT iteration count below the NIST SP 800-132 minimum
+        # of 10,000, or a CONSTANT short salt literal new byte[n] with n < 16
+        # (the 128-bit salt floor).  R082-javasecret owns the literal-PASSWORD
+        # PBEKeySpec form (first argument in quotes stays quiet here); R066
+        # javacrypto owns weak ALGORITHM names; R074-javakeysz owns key sizes;
+        # R081-javapwencode owns weak Spring hash-encoder classes.  Variable
+        # iteration/salt arguments stay quiet (not statically judgeable).
+        "R107-javapbeparm",
+        "security",
+        "high",
+        "Java PBE parameter construction uses a weak iteration count (constant below 10,000) or a short salt literal (new byte[n], n < 16) at a PBEKeySpec / PBEParameterSpec — CWE-916",
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+PBEKeySpec\s*\(\s*(?![\"'])[^,\n]+?\s*,\s*[^,\n]+?\s*,\s*(?:0|[1-9]\d{0,3})(?:\s*,\s*[^,)\n]+)?\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+PBEParameterSpec\s*\(\s*[^,\n]+?\s*,\s*(?:0|[1-9]\d{0,3})(?:\s*,\s*[^,)\n]+)?\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+PBEKeySpec\s*\(\s*(?![\"'])[^,\n]+?\s*,\s*new\s+byte\s*\[\s*(?:[0-9]|1[0-5])\s*\]\s*(?:,\s*[^,)\n]+)*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+PBEParameterSpec\s*\(\s*new\s+byte\s*\[\s*(?:[0-9]|1[0-5])\s*\]\s*(?:,\s*[^,)\n]+)*\))",
+        "A Java program constructs PBE parameters with insufficient computational effort — CWE-916: a PBEKeySpec(password, salt, iterations) or PBEParameterSpec(salt, iterations) whose iteration count is a constant below the NIST SP 800-132 minimum of 10,000 (e.g. 1000), or whose salt is a constant short literal new byte[n] with n < 16 (below the 128-bit floor), produces a derived key an offline attacker can brute-force in seconds. Password-based encryption is only as strong as the work factor and salt entropy: raise the iteration count to at least 100,000 (or the platform max), use a full-length salt from SecureRandom (new byte[16]; new SecureRandom().nextBytes(salt)), and prefer an adaptive KDF such as PBKDF2 (SecretKeyFactory.getInstance(\"PBKDF2WithHmacSHA256\")) with a high keyIterations value. Literal-password PBEKeySpec forms are R082-javasecret's domain; weak algorithm names are R066-javacrypto's; variable iteration/salt arguments, adequate constants (10000+ iterations, new byte[16]+ salts), high-iteration configs, comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
