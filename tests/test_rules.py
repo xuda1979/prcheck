@@ -5073,6 +5073,51 @@ def test_javabodyread_bounded_or_other_operations_stay_quiet():
     ]
 
 
+def test_javastativ_static_zero_iv_flagged():
+    """R105-javastativ flags Java cipher IVs built from a predictable
+    constant (CWE-329): zero byte arrays, hardcoded string-literal
+    .getBytes(), and uppercase IV constants."""
+    src = (
+        'IvParameterSpec iv = new IvParameterSpec(new byte[16]);\n'
+        'cipher.init(Cipher.ENCRYPT_MODE, key, new IvParameterSpec(new byte[16]));\n'
+        'cipher.init(Cipher.ENCRYPT_MODE, key, new IvParameterSpec(ZERO_IV));\n'
+        'IvParameterSpec iv = new IvParameterSpec("1234567890123456".getBytes());\n'
+        'cipher.init(Cipher.ENCRYPT_MODE, keySpec, new IvParameterSpec(FIXED_IV));\n'
+        'cipher.init(Cipher.ENCRYPT_MODE, key, new IvParameterSpec("0123456789abcdef".getBytes(StandardCharsets.UTF_8)));\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R105-javastativ"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javastativ_variable_or_derived_ivs_stay_quiet():
+    """R105-javastativ stays quiet for variable IVs, SecureRandom-derived
+    IVs, GCMParameterSpec nonces, bare cipher.init(iv), DECRYPT_MODE with
+    a stored IV, 3-arg IvParameterSpec slices, and comment/string-literal
+    reproductions."""
+    src = (
+        'byte[] iv = new byte[16];\n'
+        'IvParameterSpec iv = new IvParameterSpec(ivBytes);\n'
+        'IvParameterSpec iv = new IvParameterSpec(randomIv);\n'
+        'cipher.init(Cipher.ENCRYPT_MODE, key, iv);\n'
+        'byte[] iv = new byte[16]; new SecureRandom().nextBytes(iv);\n'
+        '// new IvParameterSpec(new byte[16]);\n'
+        'String s = "new IvParameterSpec(new byte[16])";\n'
+        'GCMParameterSpec gcm = new GCMParameterSpec(128, ivBytes);\n'
+        'IvParameterSpec iv = new IvParameterSpec(secret.getBytes());\n'
+        'IvParameterSpec iv = new IvParameterSpec(userInputIv);\n'
+        'byte[] zeroSha = new byte[16]; IvParameterSpec iv = new IvParameterSpec(zeroSha);\n'
+        '// new IvParameterSpec(FIXED_IV);\n'
+        'cipher.init(Cipher.DECRYPT_MODE, key, new IvParameterSpec(iv));\n'
+        'IvParameterSpec iv = new IvParameterSpec(saltBytes, 0, 16);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R105-javastativ"], [
+        (i.rule_id, i.line, i.snippet) for i in issues if i.rule_id == "R105-javastativ"
+    ]
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -5302,6 +5347,7 @@ def test_every_rule_has_test_exposure():
         "R102-javaseed",
         "R103-javasessionexp",
         "R104-javabodyread",
+        "R105-javastativ",
     }
     assert exposed <= rids
     uncovered = rids - exposed

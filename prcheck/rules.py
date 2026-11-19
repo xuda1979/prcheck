@@ -3618,6 +3618,35 @@ _RULE_TUPLES = [
         r"\bByteBuffer\s*\.\s*allocate\s*\(\s*(?:request|req|httpRequest|httpServletRequest)\s*\.\s*getContentLength\s*\(\s*\)\s*\))",
         "A Java handler pulls the whole HTTP request body into memory — or sizes an allocation from the client-controlled Content-Length — with no cap, opening CWE-770/400 (allocation without limits / uncontrolled resource consumption): Apache Commons IOUtils.toByteArray/toString/toCharArray/readLines and Guava CharStreams/ByteStreams copy helpers over request.getInputStream()/getReader(), Spring StreamUtils/FileCopyUtils.copyToByteArray/copyToString/copyToCharArray, InputStream.readAllBytes() on the request stream, and new byte[request.getContentLength()] / ByteBuffer.allocate(getContentLength()). Content-Length is attacker-controlled (any value up to Integer.MAX_VALUE) and GET/POST bodies can arrive unbounded, so a single request exhausts heap or triggers NegativeArraySizeException — DoS. Cap the read (read into a fixed buffer, use readNBytes(n)/copy() streaming with a max, or reject bodies over a configured limit — request.getContentLength() > MAX → 413 PAYLOAD_TOO_LARGE) before any full-body copy or length-driven allocation. Distinct from deserialization (R054/R088), upload client-filename sinks (R090, CWE-434), zip/XSLT parse-side sinks and DOM/XXE parsers — this rule owns request-body read-copy/readAllBytes/allocation sinks only. Streaming copies (IOUtils.copy), bounded reads (read(buffer)/readNBytes(n)), fixed buffers, capped allocations, variable sources, bare getters, single-line getReader().readLine(), upload artifact streams (R090 domain), non-request streams and comment/string-literal reproductions stay quiet",
     ),
+    (
+        # R105-javastativ: Java cipher IV handed to Cipher.init() (or an
+        # IvParameterSpec constructor) built from a PREDICTABLE CONSTANT:
+        # (1) a zero byte array new IvParameterSpec(new byte[n]) — the zero IV
+        # ciphertext re-encrypted attacks, (2) a hardcoded string literal
+        # .getBytes() — new IvParameterSpec("...".getBytes()), and (3) an
+        # UPPERCASE IV constant identifier (IV-prefixed/suffixed name like
+        # ZERO_IV/FIXED_IV/INIT_VECTOR) — static IV reused across all records
+        # defeats CBC counter/IV freshness. All CWE-329 (not using a random IV
+        # with cipher block chaining). Distinct from R074-javakeysz (key
+        # generation sizes, not cipher init IVs) and R015/R066/R048/R081
+        # (hashes, never IV containers).
+        "R105-javastativ",
+        "security",
+        "high",
+        "Java AES/CBC-style cipher IV built from a predictable constant — new IvParameterSpec(new byte[n]) zero IV, new IvParameterSpec(\"...\".getBytes()) hardcoded literal, or new IvParameterSpec(UPERCASE_IV_CONST) static constant (CWE-329)",
+        # CWE-329 not using a random IV with cipher block chaining,
+        # OWNED by R105-javastativ: new IvParameterSpec fed a zero byte
+        # array (new byte[n]), a string-literal .getBytes() (any charset
+        # arg), or an uppercase IV-prefixed/suffixed constant identifier.
+        # choose Cipher iv, a SecureRandom IV, or derive one at init.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+IvParameterSpec\s*\(\s*new\s+byte\s*\[\s*\d*\s*\]\s*[,)])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+IvParameterSpec\s*\(\s*[\"'][^\"'\n]+[\"']\s*\.\s*getBytes\s*\([^)\n]*\)\s*[,)])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+IvParameterSpec\s*\(\s*(?:\b[A-Z][A-Z0-9_]*IV[A-Z0-9_]*\b|\bIV[A-Z0-9_]*\b)\s*\))",
+        "A Java AES/CBC-style cipher IV is built from a predictable constant, opening CWE-329 (not using a random IV with cipher block chaining): new IvParameterSpec(new byte[n]) zeroes the IV, new IvParameterSpec(\"...\".getBytes()) hardcodes it in source, and new IvParameterSpec(IV_CONST) reuses one static vector for every record. A fixed/zero IV weakens CBC confidentiality, enables chosen-plaintext watermarking and lets an attacker encrypt chosen data under the same IV to cross-check blocks. Swap a SecureRandom-generated IV (byte[] iv = new byte[16]; new SecureRandom().nextBytes(iv); then new IvParameterSpec(iv)) or use a per-record random IV with the default one-shot init, so each message gets fresh, unpredictable IV bytes. IVs are not secret, but they MUST be unique/unpredictable per encryption — reuse is the vulnerability. Variable IVs (ivBytes/randomIv from SecureRandom), GCMParameterSpec (nonce, authenticated), bare cipher.init(...iv) where the IvParameterSpec came from an earlier line, DECRYPT_MODE driven by a nonce/stored IV, 3-arg IvParameterSpec(byte[], off, len) slices and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
