@@ -3520,6 +3520,42 @@ _RULE_TUPLES = [
         r"\bPaths\s*\.\s*get\s*\([^)\n]*,\s*\b(?P=e2)\s*\.\s*getName\s*\(\s*\)\s*\))",
         "A Java archive-extraction routine writes an entry whose name is resolved from an iterator-returned ZipEntry/JarEntry variable with a GENERIC identifier — the zip-slip write gap of CWE-22 that R089-javazip's entry|ze|jarEntry anchor misses. Code like 'ZipFile zf = new ZipFile(f); Enumeration<? extends ZipEntry> en = zf.entries(); while (en.hasMoreElements()) { ZipEntry e = en.nextElement(); File out = new File(dir, e.getName()); }' or 'ZipEntry e2 = zin.getNextEntry(); Path p = Paths.get(outDir, e2.getName());' writes each entry to a path derived from an attacker-controlled entry name: a crafted '../../etc/cron.d/x' or absolute name escapes the extraction root. Flagged only when the same line links the iterator declaration to a path/write sink (new File(dir, name), Files.copy/write/newOutputStream/createDirectories over name, or two-arg Paths.get(dir, name) without .resolve) — a lazy slash-aware gap plus a second comment/string guard at the sink keeps comment/string reproductions and trailing-comment sinks quiet, and the scoped ?! name check keeps R089's entry/ze/jarEntry shapes (and their \\w* suffixes) in R089's domain. Fixes: validate each entry name against the base dir, reject '..' / leading '/' / drive letters, resolve with toRealPath() under the extraction root, and cap extracted sizes. Distinct from R089-javazip (whitelisted entry|ze|jarEntry identifiers) and R063-javapath (request/filename accessors, no archive-iterator linkage); concatenations without a path/write sink, getEntry() lookups, a lone getNextEntry() loop reading the stream, multiline declarations and R089's named shapes stay quiet",
     ),
+    (
+        "R102-javaseed",
+        "security",
+        "high",
+        "Java PRNG explicitly seeded with a constant or variable seed: new Random(<literal|var>), Random-family setSeed(...), and new SecureRandom(<byte[] seed>) (CWE-337)",
+        # CWE-337 predictable-seed gap NOT owned by R068-javarandom.
+        # R068-javarandom fires only when a security keyword precedes a PRNG
+        # sink (its keyword-before-sink single-line contract); the
+        # seed-determinism angle is unowned — R102-javaseed owns it: an
+        # explicit seed makes the generator's sequence reproducible, so a
+        # seeded RNG must not supply unguessable values (session tokens,
+        # crypto keys, ids).  Four branches, each opened by the shared
+        # (?<!...) comment/string guard and closed by its PREFIX-group ):
+        #   BR1 new Random(<integer literal>)       — fixed LCG state
+        #   BR2 new Random(<variable seed>)         — reproducible unless the
+        #       seed is unguessable; System/Runtime time expressions excluded
+        #   BR3 <random-family receiver>.setSeed(   — reseeding a live
+        #       (literal|variable))                   generator (incl. SecureRandom)
+        #   BR4 new SecureRandom(<byte[] seed>)    — fixed-seed constructor
+        #       input that undermines the DRBG-style construction
+        # No inline flag (Java CamelCase).  Single-line contract.  Unseeded
+        # generators, SecureRandom.getInstance(...), time-derived seeds and
+        # line-start comment/string reproductions stay quiet (the same guard
+        # limitations as every sibling Java rule).
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+(?:java\.util\.)?Random\s*\(\s*(?:[+-]?(?:0[xX][0-9a-fA-F]+|0[bB][01]+|\d[\d_]*)[lL]?)\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+(?:java\.util\.)?Random\s*\(\s*(?:(?!\s*\))(?!(?:System|Runtime)\s*\.)[A-Za-z_]\w*)\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:secureRandom|random|rnd|rand|randomizer|prng|rng|sr)\w*\s*\.\s*setSeed\s*\(\s*(?:"
+        r"(?:[+-]?(?:0[xX][0-9a-fA-F]+|0[bB][01]+|\d[\d_]*)[lL]?)"
+        r"|(?:(?!\s*\))(?!(?:System|Runtime)\s*\.)[A-Za-z_]\w*))\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+(?:java\.security\.)?SecureRandom\s*\(\s*(?!\s*\))[^)\n]*?\))",
+        "A Java pseudo-random generator is given an explicit seed, making the sequence reproducible: new Random(42) / new Random(seed) / rnd.setSeed(42) fix the LCG state for java.util.Random, and new SecureRandom(new byte[]{...}) feeds the SecureRandom constructor a fixed byte array. An attacker who discovers or guesses the seed (a constant, a small int, a field value) can regenerate the entire sequence offline — for this the caller only has to observe one output. Any value minted from a seeded generator therefore loses its unpredictability. Use the no-arg SecureRandom (new SecureRandom(), sr.nextBytes(...)) and never call setSeed on a live generator; for tests use Security.setSeed only on throwaway instances. The SAFE forms stay quiet: unseeded new Random(), unseeded new SecureRandom(), SecureRandom.getInstance(...), time-derived seeds like new Random(System.nanoTime()), R068-javarandom's keyword-before-sink domain, and comment/string-literal reproductions",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

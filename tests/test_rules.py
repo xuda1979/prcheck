@@ -4926,6 +4926,51 @@ def test_javazipgen_whitelisted_shapes_and_no_write_stay_quiet():
     ]
 
 
+def test_javaseed_explicit_seed_flagged():
+    """R102-javaseed flags a Java PRNG that is given an explicit seed
+    (CWE-337): new Random(<integer literal>), new Random(<variable seed>),
+    Random-family setSeed(...) re-seeding, and new SecureRandom(<byte[]
+    seed>) — the seed-determinism angle no sibling rule owns."""
+    src = (
+        'Random r = new Random(42);\n'
+        'Random rnd = new Random(seed);\n'
+        'SecureRandom sr = new SecureRandom(new byte[]{1,2,3});\n'
+        'rnd.setSeed(42);\n'
+        'Random gen = new Random(0x5EED);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R102-javaseed"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaseed_unseeded_or_crypto_safe_stays_quiet():
+    """R102-javaseed stays quiet for unseeded generators, time-derived
+    seeds (System.nanoTime/currentTimeMillis), SecureRandom.getInstance(...),
+    comment/string-literal reproductions, non-Random-family setSeed calls,
+    and unseeded SecureRandom nextBytes usage."""
+    src = (
+        'Random r = new Random();\n'
+        'SecureRandom sr = new SecureRandom();\n'
+        'byte[] k = new byte[16]; new SecureRandom().nextBytes(k);\n'
+        'String token = String.valueOf(new Random().nextLong());\n'
+        'SecureRandom s2 = SecureRandom.getInstance("SHA1PRNG");\n'
+        'new Random(System.nanoTime());\n'
+        'new Random(System.currentTimeMillis());\n'
+        '// new Random(42);\n'
+        'String s = "new Random(42);";\n'
+        'Collections.shuffle(list);\n'
+        'int seed = 42;\n'
+        'mt19937.setSeed(7);\n'
+        'random.setSeed(System.nanoTime());\n'
+        '// rnd.setSeed(42);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R102-javaseed"], [
+        (i.rule_id, i.line, i.snippet) for i in issues if i.rule_id == "R102-javaseed"
+    ]
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -5152,6 +5197,7 @@ def test_every_rule_has_test_exposure():
         "R099-java4hdr",
         "R100-javaxexp",
         "R101-javazipgen",
+        "R102-javaseed",
     }
     assert exposed <= rids
     uncovered = rids - exposed
