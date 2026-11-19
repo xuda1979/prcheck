@@ -3259,6 +3259,66 @@ _RULE_TUPLES = [
         r"\b(?:xquery|xq)\w*\s*\.\s*(?:evaluate|executeQuery|prepare)\s*\([^;\n]*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\()",
         "Java XSLT/XQuery injection (CWE-643): a JAXP transformer, XQJ or Saxon query sink handed an expression built from concatenated or request-derived input on the same line — TransformerFactory/SAXTransformerFactory .newInstance().newTransformer/newTemplates/newTransformerHandler (or the factory/tf receiver form) wrapped in new StreamSource(...), a transformer/transformerHandler .transform(new StreamSource(...), ...), the XQJ receiver's prepareExpression/createExpression, and the Saxon xquery/xq evaluate/executeQuery/prepare. Control over a piece of the XSLT (an <xsl:import>/<xsl:include> href, xsl:param text, select/match predicate) lets an attacker run server-side code in the JAXP extension-function space or read arbitrary nodes; a concatenated XQuery predicate can flip the flwor/let-where shape and exfiltrate data. Serve only fixed, developer-controlled stylesheets, keep XQuery templates static and bind variables, and whitelist any user hint before it can influence the query shape. Literal stylesheets/queries, factory/property-setup lines, XQDataSource construction, javax.xml.xpath/DOM4J (R059-xpathjava), template engines (R078-javatpl), XML parse sinks (R062-javaxxe), SQL/XPath/SpEL families (R056/R058/R094/R055), and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R097-javajexl",
+        "security",
+        "high",
+        "Java Apache Commons JEXL expression/script built from concatenated or request-derived input and evaluated on the JVM",
+        # CWE-917 (Improper Neutralization of Special Elements in an
+        # Expression-Language Statement): Commons JEXL compiles and runs the
+        # expression string on the server JVM, so a JEXL expression built
+        # from request input can reach static-method invocation (''.getClass()
+        # .forName(...) / reflection gadget chains) = RCE, exactly like SpEL/
+        # OGNL.  Branch layout (single-line contract; Java sources are
+        # case-sensitive CamelCase, so no inline flag):
+        #   BR1 JexlBuilder().create().createExpression/createScript
+        #   BR2 named receivers jexl / jexlEngine / exprEngine with
+        #       createExpression/createScript
+        #   BR3 runtime receivers jexlExpression / jexlScript with
+        #       evaluate/execute
+        #   BR4 legacy static ExpressionFactory.createExpression (JEXL 1.x/
+        #       2.x) — a FIRST-argument sink with no .newInstance() chain
+        # Each sink carries the three taint variants shared with the
+        # R072/R073/R076/R096 Java series: a quoted + lowercaseIdentifier
+        # concatenation, a request/req accessor argument, or a
+        # var.toString/append/build/concat/format/valueOf builder call.
+        # Distinct from R055-spelinj (CWE-917): R055 covers SpEL/MVEL/OGNL/
+        # javax.el only, and its ExpressionFactory branch REQUIRES
+        # .newInstance().create(Value|Method)Expression with the expression
+        # as the SECOND argument — JEXL's static single-arg createExpression
+        # and the JexlBuilder/jexl* receiver vocabulary never overlap.  R072-
+        # javaeval (CWE-94) owns script-engine .eval on engine/groovyShell/
+        # jshell receivers — createExpression/createScript and evaluate (with
+        # no 'eval' spelling) are not in its method surface.  Literal
+        # expressions, engine/context/builder construction and property-setup
+        # lines, setVariable staging, context-only evaluate/execute calls,
+        # and comment/string-literal reproductions stay quiet.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bJexlBuilder\s*\(\s*\)\s*\.\s*create\s*\(\s*\)\s*\.\s*(?:createExpression|createScript)\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bJexlBuilder\s*\(\s*\)\s*\.\s*create\s*\(\s*\)\s*\.\s*(?:createExpression|createScript)\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getRequestURL|getPathInfo|getInputStream|getReader|getParameterValues)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bJexlBuilder\s*\(\s*\)\s*\.\s*create\s*\(\s*\)\s*\.\s*(?:createExpression|createScript)\s*\([^;\n]*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:jexl|jexlEngine|exprEngine)\b\s*\.\s*(?:createExpression|createScript)\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:jexl|jexlEngine|exprEngine)\b\s*\.\s*(?:createExpression|createScript)\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getRequestURL|getPathInfo|getInputStream|getReader|getParameterValues)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:jexl|jexlEngine|exprEngine)\b\s*\.\s*(?:createExpression|createScript)\s*\([^;\n]*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:jexlExpression|jexlScript)\b\s*\.\s*(?:evaluate|execute)\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:jexlExpression|jexlScript)\b\s*\.\s*(?:evaluate|execute)\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getRequestURL|getPathInfo|getInputStream|getReader|getParameterValues)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:jexlExpression|jexlScript)\b\s*\.\s*(?:evaluate|execute)\s*\([^;\n]*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bExpressionFactory\s*\.\s*createExpression\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bExpressionFactory\s*\.\s*createExpression\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getRequestURL|getPathInfo|getInputStream|getReader|getParameterValues)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bExpressionFactory\s*\.\s*createExpression\s*\([^;\n]*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\()",
+        "Java Apache Commons JEXL expression injection (CWE-917): a JEXL expression/script built from concatenated or request-derived input and handed to createExpression/createScript (the JexlBuilder().create() chain, or the jexl/jexlEngine/exprEngine/jexlExpression/jexlScript receivers) or to the legacy static ExpressionFactory.createExpression is compiled and evaluated on the JVM, so untrusted input can reach static-method invocation gadgets (''.getClass().forName(...) and reflection chains) for RCE. Keep expression templates as fixed server-side constants, bind all user data through MapContext/JexlContext variables, and never concatenate request values into the expression string; sandbox or disable JEXL's method-invocation surface as defense-in-depth. Literal expressions, engine/context/builder construction and property-setup lines, setVariable staging, context-only evaluate/execute calls (evaluating a literal expression), javax.el/SpEL/MVEL/OGNL (R055-spelinj), script-engine eval (R072-javaeval), and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

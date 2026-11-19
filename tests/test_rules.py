@@ -4646,6 +4646,64 @@ def test_javaxquery_literal_or_nonquery_xml_lines_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R096-javaxquery"], issues
 
 
+def test_javajexl_expressions_built_from_untrusted_input_flagged():
+    """R097-javajexl flags Java Apache Commons JEXL expression/script sinks
+    fed concatenated or request-derived input — the JexlBuilder().create()
+    chain, jexl/jexlEngine/exprEngine receivers, jexlExpression/jexlScript
+    runtime evaluate/execute, and the legacy static
+    ExpressionFactory.createExpression — CWE-917 expression-language
+    injection."""
+    src = (
+        'new JexlBuilder().create().createExpression("1 + " + operand);\n'
+        'new JexlBuilder().create().createScript("{" + payload + "}");\n'
+        'new JexlBuilder().create().createExpression(queryBuilder.toString());\n'
+        'jexl.createExpression("user == \'" + userInput + "\'");\n'
+        'jexlEngine.createScript("var x = " + expression);\n'
+        'exprEngine.createExpression(req.getHeader("X-JEXL"));\n'
+        'exprEngine.createExpression(exprBuffer.toString());\n'
+        'jexlExpression.evaluate("1 + " + operand);\n'
+        'jexlScript.execute(req.getInputStream());\n'
+        'jexlExpression.evaluate(exprBuilder.toString());\n'
+        'ExpressionFactory.createExpression("user == \'" + username + "\'");\n'
+        'ExpressionFactory.createExpression(req.getParameter("expr"));\n'
+        'ExpressionFactory.createExpression(templateBuilder.toString());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R097-javajexl"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javajexl_literal_or_nonjexl_lines_stay_quiet():
+    """R097-javajexl stays quiet for the safe side: literal expression
+    strings, MapContext/JexlContext construction and setVariable staging,
+    context-only evaluate/execute calls, JexlBuilder configuration,
+    property-setup lines, comment/string-literal reproductions, and other
+    expression/script families (javax.el, script engines, JDBC)."""
+    src = (
+        'JexlExpression expr = jexlEngine.createExpression("user == \'admin\'");\n'
+        'jexl.createExpression("1 + 1");\n'
+        'MapContext context = new MapContext();\n'
+        'context.setVariable("user", req.getParameter("user"));\n'
+        'new JexlBuilder().namespaces(map).cache(0).silent(false).create();\n'
+        'jexlEngine.setProperty(JexlEngine.FUNCTIONS, funcs);\n'
+        'expr.evaluate(context);\n'
+        'jexlExpression.evaluate(context);\n'
+        'Object out = jexlScript.execute(context);\n'
+        '// jexl.createExpression("x + " + userInput);\n'
+        'String e = "JexlBuilder().create().createExpression(" + q + ")";\n'
+        'logger.info("jexlEngine.createExpression(\\"" + q + "\\")");\n'
+        'ExpressionFactory.createExpression("x == 1");\n'
+        'JexlContext jc = new MapContext();\n'
+        'JexlBuilder builder = new JexlBuilder();\n'
+        'elProcessor.eval("#{bean." + prop + "}");\n'
+        'scriptEngine.eval(req.getParameter("code"));\n'
+        'conn.prepareStatement("SELECT " + id);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R097-javajexl"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4867,6 +4925,7 @@ def test_every_rule_has_test_exposure():
         "R094-mybatis",
         "R095-javanosql",
         "R096-javaxquery",
+        "R097-javajexl",
     }
     assert exposed <= rids
     uncovered = rids - exposed
