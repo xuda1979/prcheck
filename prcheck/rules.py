@@ -3474,6 +3474,52 @@ _RULE_TUPLES = [
         r"\b[A-Za-z_]\w*\s*\.\s*setXIncludeAware\s*\(\s*true\s*)",
         "A Java XML factory/reader is configured to EXPAND external entities or to switch OFF the hardening that prevents it — the configuration side of CWE-776 (unbounded entity expansion, 'billion laughs'; also feeds CWE-611 XXE). With setExpandEntityReferences(true), external-general/parameter-entities=true, load-external-dtd=true, disallow-doctype-decl=false, accessExternalDTD / isSupportingExternalEntities set to a non-empty value, IS_SUPPORTING_EXTERNAL_ENTITIES=true or setXIncludeAware(true), a crafted document can nest entity declarations to exhaust memory/CPU or pull external resources. Configure the hardened side instead: disallow-doctype-decl=true, external-general-entities=false, external-parameter-entities=false, load-external-dtd=false, accessExternalDTD/accessExternalSchema='' (empty), and no XInclude/XPath expansion; prefer a safe, schema-less in-memory parser. R062-javaxxe flags parsing untrusted input; R100-javaxexp flags the configuration that makes expansion possible — together they close the XXE/entity-expansion surface (R010 firing on these lines is its unrelated insecure-http-URL scan)",
     ),
+    (
+        "R101-javazipgen",
+        "security",
+        "high",
+        "Java zip-slip write from an archive iterator entry of a GENERIC name: a ZipEntry/JarEntry literal declared off getNextEntry/getNextJarEntry/nextElement (identifiers outside R089-javazip's entry|ze|jarEntry whitelist) whose getName() reaches new File(...), Files.copy/write/newOutputStream/createDirectories, or a two-arg Paths.get(dir, name) without .resolve (CWE-22)",
+        # CWE-22 zip-slip write-side gap NOT covered by R089-javazip.
+        # R089-javazip anchors on entry|ze|jarEntry variables (and their
+        # \w* suffixes) and on Paths.get(...).resolve(...), ZipFile-level
+        # enumeration and two-arg Paths.get(dir, name) without .resolve are
+        # its documented gaps.  R101-javazipgen closes those: it anchors on a
+        # LITERAL ZipEntry/JarEntry declaration that is fed by an archive
+        # iterator — Enumeration.nextElement() (ZipFile.entries()), or the
+        # getNextEntry()/getNextJarEntry() loop — with a variable name that
+        # R089's whitelist rejects (e, en, e2, zn, ev, ...), and requires the
+        # same line to carry a path/write sink taking entry.getName():
+        #   BR1 new File(dir, <gen>.getName())
+        #   BR2 Files.copy/write/newOutputStream/createDirectories(
+        #       ..., <gen>.getName(), ...)
+        #   BR3 Paths.get(dir, <gen>.getName()) — two-arg form (no .resolve)
+        # Each branch is the shared (?<!...) comment/string guard + the
+        # iterator declaration (scoped ?! on the name keeps R089's shapes
+        # quiet) + a lazy slash-aware gap (cannot cross // or /*) + a second
+        # guard right at the sink.  Backrefs are NAMED per branch (each is an
+        # independent top-level alternative, so plain \1 would alias across
+        # them).  A concat/log read with no path/write sink, getEntry()
+        # lookups, request-fed getNextEntry without a write, comment/string
+        # reproductions, multi-line split declarations and R089's named
+        # shapes stay quiet.  Java sources are case-sensitive CamelCase, so
+        # no inline flag.  Single-line contract.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:ZipEntry|JarEntry)\s+(?!entry\w*|ze\w*|jarEntry\w*)(?P<e0>[A-Za-z_]\w*)\s*=\s*\w+\s*\.\s*(?:getNextEntry|getNextJarEntry|nextElement)\s*\(\s*\)"
+        r"(?:[^/]|/(?![*/]))*"
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*))"
+        r"\bnew\s+File\s*\([^)\n]*\b(?P=e0)\s*\.\s*getName\s*\(\s*\)\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:ZipEntry|JarEntry)\s+(?!entry\w*|ze\w*|jarEntry\w*)(?P<e1>[A-Za-z_]\w*)\s*=\s*\w+\s*\.\s*(?:getNextEntry|getNextJarEntry|nextElement)\s*\(\s*\)"
+        r"(?:[^/]|/(?![*/]))*"
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*))"
+        r"\bFiles\s*\.\s*(?:copy|write|newOutputStream|createDirectories)\s*\([^)\n]*\b(?P=e1)\s*\.\s*getName\s*\([^)\n]*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:ZipEntry|JarEntry)\s+(?!entry\w*|ze\w*|jarEntry\w*)(?P<e2>[A-Za-z_]\w*)\s*=\s*\w+\s*\.\s*(?:getNextEntry|getNextJarEntry|nextElement)\s*\(\s*\)"
+        r"(?:[^/]|/(?![*/]))*"
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*))"
+        r"\bPaths\s*\.\s*get\s*\([^)\n]*,\s*\b(?P=e2)\s*\.\s*getName\s*\(\s*\)\s*\))",
+        "A Java archive-extraction routine writes an entry whose name is resolved from an iterator-returned ZipEntry/JarEntry variable with a GENERIC identifier — the zip-slip write gap of CWE-22 that R089-javazip's entry|ze|jarEntry anchor misses. Code like 'ZipFile zf = new ZipFile(f); Enumeration<? extends ZipEntry> en = zf.entries(); while (en.hasMoreElements()) { ZipEntry e = en.nextElement(); File out = new File(dir, e.getName()); }' or 'ZipEntry e2 = zin.getNextEntry(); Path p = Paths.get(outDir, e2.getName());' writes each entry to a path derived from an attacker-controlled entry name: a crafted '../../etc/cron.d/x' or absolute name escapes the extraction root. Flagged only when the same line links the iterator declaration to a path/write sink (new File(dir, name), Files.copy/write/newOutputStream/createDirectories over name, or two-arg Paths.get(dir, name) without .resolve) — a lazy slash-aware gap plus a second comment/string guard at the sink keeps comment/string reproductions and trailing-comment sinks quiet, and the scoped ?! name check keeps R089's entry/ze/jarEntry shapes (and their \\w* suffixes) in R089's domain. Fixes: validate each entry name against the base dir, reject '..' / leading '/' / drive letters, resolve with toRealPath() under the extraction root, and cap extracted sizes. Distinct from R089-javazip (whitelisted entry|ze|jarEntry identifiers) and R063-javapath (request/filename accessors, no archive-iterator linkage); concatenations without a path/write sink, getEntry() lookups, a lone getNextEntry() loop reading the stream, multiline declarations and R089's named shapes stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

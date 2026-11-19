@@ -4874,6 +4874,58 @@ def test_javaxexp_hardened_parser_config_stays_quiet():
         assert i.rule_id != "R100-javaxexp", (i.rule_id, i.line, i.snippet)
 
 
+def test_javazipgen_iterator_generic_name_write_flagged():
+    """R101-javazipgen flags the CWE-22 zip-slip write side R089-javazip
+    misses: a ZipEntry/JarEntry-typed variable with a GENERIC identifier
+    (not entry/ze/jarEntry) declared from an archive iterator
+    (Enumeration.nextElement / getNextEntry / getNextJarEntry), whose
+    .getName() reaches a path/write sink on the same line — new File(dir,
+    name), Files.copy/write/newOutputStream/createDirectories over name,
+    or two-arg Paths.get(dir, name) without .resolve."""
+    src = (
+        'ZipFile zf = new ZipFile(file); Enumeration<? extends ZipEntry> en = zf.entries(); while (en.hasMoreElements()) { ZipEntry e = en.nextElement(); File f = new File(dir, e.getName()); }\n'
+        'ZipInputStream zin = new ZipInputStream(in); ZipEntry e2 = zin.getNextEntry(); Path p = Paths.get(outDir, e2.getName());\n'
+        'ZipEntry en2 = zis.getNextEntry(); File f = new File(dir, en2.getName());\n'
+        'ZipEntry zn = zis.getNextEntry(); Files.write(Paths.get("out", zn.getName()), data);\n'
+        'JarEntry ev = jar.getNextJarEntry(); File out = new File(root, ev.getName());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R101-javazipgen"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+    # R089 owns the entry|ze|jarEntry shapes only — these generic identifiers
+    # must not be double-reported by R089.
+    assert not [i for i in issues if i.rule_id == "R089-javazip"], [
+        (i.rule_id, i.line) for i in issues if i.rule_id == "R089-javazip"
+    ]
+
+
+def test_javazipgen_whitelisted_shapes_and_no_write_stay_quiet():
+    """R101-javazipgen stays quiet for R089-javazip's whitelisted
+    entry/ze/jarEntry identifiers, getEntry() lookups, loops without a
+    write sink, comment/string-literal reproductions, sinks whose name
+    flows through a concat, and declarations without a same-line sink."""
+    src = (
+        'ZipEntry entry = zip.getNextEntry(); File out = new File(dest, entry.getName());\n'
+        'ZipEntry ze = zin.getNextEntry(); File f = new File(dir, ze.getName());\n'
+        'ZipEntry entry2 = zis.getNextEntry(); Files.write(Paths.get("o", entry2.getName()), d);\n'
+        'ZipEntry jarEntry = jar.getNextJarEntry(); Path p = Paths.get(outDir, jarEntry.getName());\n'
+        'String n = e.getName();\n'
+        'ZipEntry e = zin.getNextEntry();\n'
+        'ZipEntry trusted = zip.getEntry("safe.txt"); File f = new File(dir, trusted.getName());\n'
+        '// ZipEntry e = zin.getNextEntry(); Path p = Paths.get(outDir, e.getName());\n'
+        'logger.info("ZipEntry e = zis.getNextEntry(); Path p = Paths.get(outDir, e.getName());");\n'
+        'File f = new File(dir, e.getName());\n'
+        'ZipEntry e2 = zin.getNextEntry(); String s = "Paths.get(outDir, e2.getName())";\n'
+        'ZipEntry e = zis.getNextEntry(); // File f = new File(dir, e.getName());\n'
+        'ZipEntry e = zis.getNextEntry(); String t = "/out/" + e.getName();\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R101-javazipgen"], [
+        (i.rule_id, i.line, i.snippet) for i in issues if i.rule_id == "R101-javazipgen"
+    ]
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -5099,6 +5151,7 @@ def test_every_rule_has_test_exposure():
         "R098-javatlsweak",
         "R099-java4hdr",
         "R100-javaxexp",
+        "R101-javazipgen",
     }
     assert exposed <= rids
     uncovered = rids - exposed
