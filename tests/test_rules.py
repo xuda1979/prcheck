@@ -4704,6 +4704,67 @@ def test_javajexl_literal_or_nonjexl_lines_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R097-javajexl"], issues
 
 
+def test_javatlsweak_weak_protocol_or_suite_selection_flagged():
+    """R098-javatlsweak flags Java weak TLS protocol/cipher-suite selection
+    (CWE-757): SSLContext.getInstance on SSLv2/SSLv3/SSLv2Hello/TLSv1(.0/.1),
+    sslSocket/sslServerSocket/sslEngine.setEnabledProtocols or
+    setEnabledCipherSuites, sslParameters/params.setProtocols or
+    setCipherSuites, and System.setProperty of https.protocols /
+    https.cipherSuites / jdk.tls.client|server.protocols /
+    jdk.tls.client|server.cipherSuites pinning a legacy or less-secure
+    algorithm."""
+    src = (
+        'SSLContext ctx = SSLContext.getInstance("SSLv3");\n'
+        'SSLContext context = SSLContext.getInstance("TLSv1");\n'
+        'SSLContext sslCtx = SSLContext.getInstance("TLSv1.1");\n'
+        'sslSocket.setEnabledProtocols(new String[]{"SSLv3", "TLSv1.2"});\n'
+        'sslEngine.setEnabledProtocols(new String[]{"TLSv1"});\n'
+        'sslServerSocket.setEnabledProtocols(new String[]{"TLSv1.0", "TLSv1.1"});\n'
+        'sslParameters.setProtocols(new String[]{"TLSv1"});\n'
+        'params.setProtocols(new String[]{"SSLv2Hello", "TLSv1.2"});\n'
+        'sslSocket.setEnabledCipherSuites(new String[]{"TLS_RSA_WITH_RC4_128_SHA"});\n'
+        'sslEngine.setEnabledCipherSuites(new String[]{"TLS_RSA_WITH_3DES_EDE_CBC_SHA", "TLS_RSA_WITH_AES_128_GCM_SHA256"});\n'
+        'sslParameters.setCipherSuites(new String[]{"TLS_ECDHE_RSA_WITH_NULL_SHA"});\n'
+        'System.setProperty("https.protocols", "TLSv1");\n'
+        'System.setProperty("jdk.tls.client.protocols", "SSLv3,TLSv1.1");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R098-javatlsweak"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javatlsweak_strong_or_unrelated_tls_lines_stay_quiet():
+    """R098-javatlsweak stays quiet for the safe side: TLSv1.2/TLSv1.3
+    negotiations, getInstance on "TLS"/"Default", SSLContext.getDefault()
+    and .init(), strong-only setEnabledProtocols/setEnabledCipherSuites /
+    setProtocols, setProperty on unrelated JVM properties or with strong
+    values, endpoint-identification config, and comment/string-literal
+    reproductions."""
+    src = (
+        'SSLContext ctx = SSLContext.getInstance("TLSv1.2");\n'
+        'SSLContext ctx2 = SSLContext.getInstance("TLSv1.3");\n'
+        'SSLContext ctx3 = SSLContext.getInstance("TLS");\n'
+        'SSLContext def = SSLContext.getDefault();\n'
+        'sslSocket.setEnabledProtocols(new String[]{"TLSv1.2", "TLSv1.3"});\n'
+        'sslServerSocket.setEnabledProtocols(new String[]{"TLSv1.3"});\n'
+        'sslEngine.setEnabledCipherSuites(new String[]{"TLS_AES_128_GCM_SHA256", "TLS_AES_256_GCM_SHA384"});\n'
+        'sslSocket.setEnabledCipherSuites(new String[]{"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"});\n'
+        'sslParameters.setProtocols(new String[]{"TLSv1.2"});\n'
+        'System.setProperty("https.protocols", "TLSv1.2,TLSv1.3");\n'
+        'System.setProperty("jdk.tls.client.protocols", "TLSv1.3");\n'
+        'System.setProperty("https.cipherSuites", "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256");\n'
+        'System.setProperty("java.net.preferIPv4Stack", "true");\n'
+        'sslContext.init(keyManagers, trustManagers, new SecureRandom());\n'
+        'sslParameters.setEndpointIdentificationAlgorithm("HTTPS");\n'
+        '// sslSocket.setEnabledProtocols(new String[]{"SSLv3"});\n'
+        'logger.info("SSLContext.getInstance(\\"TLSv1\\")");\n'
+        'String proto = "SSLv3";\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R098-javatlsweak"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4926,6 +4987,7 @@ def test_every_rule_has_test_exposure():
         "R095-javanosql",
         "R096-javaxquery",
         "R097-javajexl",
+        "R098-javatlsweak",
     }
     assert exposed <= rids
     uncovered = rids - exposed

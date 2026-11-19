@@ -3319,6 +3319,54 @@ _RULE_TUPLES = [
         r"\bExpressionFactory\s*\.\s*createExpression\s*\([^;\n]*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\()",
         "Java Apache Commons JEXL expression injection (CWE-917): a JEXL expression/script built from concatenated or request-derived input and handed to createExpression/createScript (the JexlBuilder().create() chain, or the jexl/jexlEngine/exprEngine/jexlExpression/jexlScript receivers) or to the legacy static ExpressionFactory.createExpression is compiled and evaluated on the JVM, so untrusted input can reach static-method invocation gadgets (''.getClass().forName(...) and reflection chains) for RCE. Keep expression templates as fixed server-side constants, bind all user data through MapContext/JexlContext variables, and never concatenate request values into the expression string; sandbox or disable JEXL's method-invocation surface as defense-in-depth. Literal expressions, engine/context/builder construction and property-setup lines, setVariable staging, context-only evaluate/execute calls (evaluating a literal expression), javax.el/SpEL/MVEL/OGNL (R055-spelinj), script-engine eval (R072-javaeval), and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R098-javatlsweak",
+        "security",
+        "high",
+        "Java weak TLS protocol/cipher-suite selection (CWE-757): SSLContext.getInstance, socket/engine/parameters setEnabledProtocols/setEnabledCipherSuites/setProtocols/setCipherSuites, or System.setProperty pinning a legacy or less-secure protocol or cipher suite",
+        # CWE-757 (Selection of Less-Secure Algorithm During Negotiation):
+        # honoring a downgrade offer to legacy SSL/TLS means the server
+        # negotiates an obsolete protocol or cipher whose broken crypto
+        # (SSLv3 POODLE, RC4, 3DES, NULL/anon/export suites, TLS 1.0/1.1)
+        # defeats the channel's confidentiality/integrity.  Branch layout
+        # (single-line contract; the scoped (?i:...) matches mixed-case
+        # literals like SSLv3/TLSv1/RC4 without disabling Java's
+        # case-sensitivity for method names):
+        #   BR1 SSLContext.getInstance("SSLv2|SSLv3|SSLv2Hello|TLSv1[.0|.1]")
+        #   BR2 sslSocket/sslServerSocket/sslEngine.setEnabledProtocols with a
+        #       weak version literal as an argument
+        #   BR3a sslParameters/params.setProtocols with a weak version literal
+        #   BR3b sslParameters/params.setCipherSuites with a weak suite marker
+        #   BR4 sslSocket/sslServerSocket/sslEngine.setEnabledCipherSuites
+        #       with a weak suite marker substring
+        #   BR5 System.setProperty(https.protocols|https.cipherSuites|
+        #       jdk.tls.client|server.protocols|cipherSuites, weak value)
+        # The tlsv1 alternative carries (?!\.?[23](?![0-9])) so a secure
+        # TLSv1.2/TLSv1.3 mention never trips it (only BR1/BR2 anchor the
+        # weak literal next to the quote; BR3a/BR5 scan the whole string).
+        # Distinct from R071-javatls (CWE-295 trust-all X509TrustManager/
+        # HostnameVerifier/sslContext.init — no protocol or suite literals
+        # at all) and R066-javacrypto (CWE-327 weak getInstance algorithms
+        # on MessageDigest/Cipher/... receivers — no SSLContext/sslSocket/
+        # System.setProperty surface); R074-javakeysz (CWE-326) owns key-size
+        # minima, not negotiated versions/suites.  getInstance literals like
+        # "TLS"/"Default", strong-only negotiations, configuration lines
+        # without a weak marker, and comment/string-literal reproductions
+        # stay quiet.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bSSLContext\s*\.\s*getInstance\s*\(\s*['\"]\s*(?i:sslv2|sslv3|sslv2hello|tlsv1(?:[._][01])?)\s*['\"])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:ssl|SSL|Ssl)(?:Socket|ServerSocket|Engine)\w*\s*\.\s*setEnabledProtocols\s*\([^;\n]*['\"]\s*(?i:sslv2|sslv3|sslv2hello|tlsv1(?:[._][01])?)\s*['\"])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:sslParameters|SSLParameters|SslParameters|params)\w*\s*\.\s*setProtocols\s*\([^;\n]*['\"][^'\n]*(?i:sslv2|sslv3|sslv2hello|tlsv1(?:[._][01])?(?!\.?[23](?![0-9])))[^'\n]*['\"])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:sslParameters|SSLParameters|SslParameters|params)\w*\s*\.\s*setCipherSuites\s*\([^;\n]*['\"][^'\n]*(?i:rc4|3des|desede|des_cbc|null|export|anon)[^'\n]*['\"])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:ssl|SSL|Ssl)(?:Socket|ServerSocket|Engine)\w*\s*\.\s*setEnabledCipherSuites\s*\([^;\n]*['\"][^'\n]*(?i:rc4|3des|desede|des_cbc|null|export|anon)[^'\n]*['\"])"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bSystem\s*\.\s*setProperty\s*\(\s*['\"]\s*(?:https\.protocols|https\.cipherSuites|jdk\.tls\.(?:client|server)\.protocols|jdk\.tls\.(?:client|server)\.cipherSuites)\s*['\"]\s*,\s*['\"][^'\n]*(?i:sslv2|sslv3|sslv2hello|tlsv1(?:[._][01])?(?!\.?[23](?![0-9]))|rc4|3des|desede|des_cbc|null|export|anon)[^'\n]*['\"])",
+        "Java weak TLS protocol/cipher-suite selection (CWE-757): code that pins a legacy or less-secure algorithm for the handshake — SSLContext.getInstance on SSLv2/SSLv3/SSLv2Hello/TLSv1(.0/.1), sslSocket/sslServerSocket/sslEngine.setEnabledProtocols or setEnabledCipherSuites, sslParameters/params.setProtocols or setCipherSuites, or System.setProperty of https.protocols/https.cipherSuites/jdk.tls.client|server.protocols/jdk.tls.client|server.cipherSuites — lets an in-path adversary downgrade the session to a protocol or suite with broken crypto (POODLE/SSLv3, RC4, 3DES, NULL/anon/export), breaking the channel's confidentiality and integrity. Require TLS 1.2+ with AEAD suites only, never enable a weak protocol or suite alongside strong ones, and prefer the JVM's secure defaults over per-site System.setProperty overrides. Trust-all certificate/verifier handling is a separate weakness (R071-javatls, CWE-295); weak digest/signature/cipher algorithm choice is R066-javacrypto (CWE-327); key-size minima are R074-javakeysz (CWE-326); comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
