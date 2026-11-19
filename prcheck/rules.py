@@ -3106,6 +3106,39 @@ _RULE_TUPLES = [
         r"\b(?:ctx|ctxt|context|jndiCtx|jndiContext|dirCtx|dirContext|ldapCtx|ldapContext|initialContext|initialDirContext|jndiTemplate)\w*\s*\.\s*lookup\s*\(\s*[a-z_]\w*(?:\.\w+\s*\([^)\n]*\))?(?:\([^)\n]*\))?\s*\))",
         "Java resolves a JNDI name built from or influenced by client input — CWE-74 injection via Context.lookup(). new InitialContext(...).lookup(...) / InitialDirContext / InitialLdapContext / JndiTemplate lookups, and ctx/context/jndiContext/dirContext/ldapContext/... .lookup(...), whose name is a quoted prefix concatenated with a variable ('java:/' + userInput, 'cn=' + userDn, 'ldap://' + host + '/' + user), a request accessor result (req.getParameter/getHeader/getQueryString/...), a builder/.toString() or handler-method chain, or a bare variable. The JNDI name picks the LDAP/RMI/IIOP registry entry to resolve; a name an attacker controls lets them substitute a registry they own and pull attacker-supplied classes into the application server — the JNDI-injection-to-RCE mechanism behind log4shell and countless CVE lists. Treat names from the request, or assembled from anything user-influenced, as untrusted: validate against an allowlist of known good names, keep java:/ or java:comp/env/ prefixes with the exact catalogued entry as a literal, and never concatenate request data into the name. Literal java:comp/env/... lookups, SCREAMING_SNAKE constants and uppercase config variables, non-JNDI receivers (map/service/logger lookup), list/listBindings reads, LDAP search-filter injection (R061-ldapjndi), cleartext scheme literals (R075-jvachttp), class-name lookups (R064-javareflect) and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R094-mybatis",
+        "security",
+        "high",
+        "Java MyBatis mapper SQL interpolates a ${...} placeholder instead of a bound parameter (CWE-89)",
+        # CWE-89 (SQL Injection): the sink is a MyBatis / Spring-Boot-JDBC mapper
+        # statement that substitutes a ${...} placeholder directly into SQL
+        # text — an @Select/@Insert/@Update/@Delete/@Query annotation argument,
+        # or a mapper XML <select>/<insert>/<update>/<delete>/<sql> body.  A
+        # ${...} placeholder is spliced verbatim into the SQL (string
+        # substitution, exactly like Python '%...' % user), so an attacker who
+        # controls the value — username, id, a column/table name handed to
+        # orderBy, a VALUES() tuple — can change the query shape: ' OR 1=1 --
+        # closes the predicate, UNION SELECT re-targets the projection, and the
+        # dynamic column/order-by use case gives no escaping path at all.  The
+        # parameterized #{...} placeholder is the safe side: it routes the value
+        # through PreparedStatement bindings and can never alter statement
+        # structure.  Distinct from R005-javasql / R012 (Python SQL)?  No —
+        # R055-spelinj (CWE-917) owns SpEL/MVEL/OGNL/EL eval sinks, R056-jpaqli
+        # (CWE-89) owns EntityManager.createQuery/JPQL/HQL string queries,
+        # R058-jdbcsqli (CWE-89) owns JDBC/JdbcTemplate exec/executeQuery/
+        # prepareStatement exec sinks, R028-nosql (CWE-943) owns Python Mongo
+        # document queries — none of them flags a MyBatis mapper annotation or
+        # mapper-XML ${...} interpolation.  Java sources are case-sensitive
+        # CamelCase, so no inline flag.  Single-line contract.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"@(?:Select|Insert|Update|Delete|Query)\s*\((?:[^)\n]|\([^)\n]*\))*\$\{(?!\{)[^}\n]*\})"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"<(?:insert|update|delete|sql)\b[^>\n]*(?:>.*|)\$\{(?!\{)[^}\n]*\})"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"<select\b[^>\n]*(?:resultType|parameterType|resultMap|statementType|keyProperty|keyColumn|useCache|flushCache|fetchSize|databaseId)[^>\n]*(?:>.*|)\$\{(?!\{)[^}\n]*\})",
+        "Java injects a MyBatis/Spring mapper ${...} placeholder into SQL — CWE-89 SQL injection. The action is string substitution, not parameter binding: @Select/@Insert/@Update/@Delete/@Query annotations and mapper XML <select>/<insert>/<update>/<delete>/<sql> snippets that interpolate ${...} splice the raw value into the statement text, so dynamic predicates ('${username}', '${name}'), IN-lists ('${ids}'), column/order-by names ('${tableName}', ORDER BY ${col}), VALUES tuples ('${role}') and reusable <sql> fragments ('${columns}') let an attacker alter the query shape or union a second one. Switch every dynamic value to the #{...} placeholder (PreparedStatement binding — safe for literals), keep ${...} only for structurally fixed, developer-supplied identifiers, and treat request-derived column/order inputs via an allowlist (e.g. Map with user-supplied keys looked up against known-good columns) because no quoting can harden a dynamic identifier. Parameterized #{...} placeholders, Spring @Value('${app.prop}') property placeholders, HTML <select th:field='${...}'> templates, JPA :name / ?1 query params (R056-jpaqli), JDBC executor sinks (R058-jdbcsqli), Python SQL (R005/R012), and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

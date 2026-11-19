@@ -4443,6 +4443,65 @@ def test_javajndi_literal_constant_or_unrelated_uses_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R093-javajndi"], issues
 
 
+def test_mybatis_interpolated_mapper_sql_flagged():
+    """R094-mybatis flags MyBatis / Spring mapper SQL that interpolates a
+    ${...} placeholder — an @Select/@Insert/@Update/@Delete/@Query annotation
+    argument or a mapper XML <select>/<insert>/<update>/<delete>/<sql> body —
+    CWE-89 SQL injection via verbatim string substitution."""
+    src = (
+        "@Select(\"SELECT * FROM users WHERE username = '${username}'\")\n"
+        '@Select("SELECT * FROM users WHERE id = ${id}")\n'
+        "@Select(\"SELECT * FROM users WHERE name LIKE '%${name}%'\")\n"
+        "@Insert(\"INSERT INTO logs(message, level) VALUES('${msg}', '${level}')\")\n"
+        "@Update(\"UPDATE accounts SET balance = balance - ${amount} WHERE id = #{id}\")\n"
+        '@Delete("DELETE FROM t WHERE id IN (${ids})")\n'
+        '@Query("SELECT u FROM User u WHERE u.name = ${name}")\n'
+        '@Query(value = "SELECT u FROM User u WHERE u.email = ${email}")\n'
+        '@Select("SELECT * FROM ${tableName} WHERE id = #{id}")\n'
+        '@Select(value = {"SELECT * FROM items WHERE sku = ${sku}"})\n'
+        '<select id="findByUser" parameterType="map"> SELECT * FROM users WHERE username = ${username} </select>\n'
+        '<select id="list" resultType="User">SELECT * FROM user WHERE name = ${name}</select>\n'
+        '<insert id="addUser"> INSERT INTO users VALUES(#{uid}, ${role}) </insert>\n'
+        '<update id="upd" parameterType="map">UPDATE t SET x = ${x}</update>\n'
+        '<sql id="cols">${columns}</sql>\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R094-mybatis"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_mybatis_parameterized_or_placeholder_or_unrelated_stay_quiet():
+    """R094-mybatis stays quiet for the safe side: #{...} bound parameters,
+    Spring @Value('${...}') property placeholders, HTML template selects, JPA
+    :name / ?1 params, JDBC/JPA executor sinks, and comment/string-literal
+    reproductions."""
+    src = (
+        '@Select("SELECT * FROM users WHERE username = #{username}")\n'
+        '@Select("SELECT 1")\n'
+        '@Value("${app.datasource.url}")\n'
+        '@Value("${app.jwt.secret}")\n'
+        '@Value("${server.port:8080}")\n'
+        'cursor.execute("SELECT * FROM users WHERE name = \'%s\'" % name)\n'
+        'select = getValue();\n'
+        '<select name="country" th:field="${user.country}">\n'
+        '// @Select("SELECT * FROM users WHERE id = ${id}")\n'
+        '/* @Select("...") */\n'
+        'String q = "@Select(\\"SELECT * FROM a WHERE b = \'${id}\'\\")";\n'
+        '@Query("SELECT u FROM User u WHERE u.name = :name")\n'
+        '@Query("SELECT u FROM User u WHERE u.name = ?1")\n'
+        'em.createQuery("SELECT u FROM User u WHERE u.name = :n")\n'
+        '<select id="x">${mylabel}</select>\n'
+        '@Insert("INSERT INTO t VALUES(#{msg})")\n'
+        '<insert id="x">INSERT INTO t VALUES(#{a}, #{b})</insert>\n'
+        'String t = "${name}";\n'
+        'DirContext ctx = new InitialDirContext(env); Object o = ctx.lookup("ldap://" + host + "/" + user);\n'
+        'logger.isInfoEnabled("user=" + "${user}")\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R094-mybatis"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4661,6 +4720,7 @@ def test_every_rule_has_test_exposure():
         "R091-javaperm",
         "R092-javaexcept",
         "R093-javajndi",
+        "R094-mybatis",
     }
     assert exposed <= rids
     uncovered = rids - exposed
