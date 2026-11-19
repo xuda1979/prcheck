@@ -4330,6 +4330,65 @@ def test_javaperm_safe_or_unrelated_uses_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R091-javaperm"], issues
 
 
+def test_javaexcept_swallowed_exception_handlers_flagged():
+    """R092-javaexcept flags Java catch blocks that swallow the exception —
+    empty/comment-only bodies, bare printStackTrace() to stderr, or a silent
+    literal-default return — CWE-390 detection of error condition without
+    action."""
+    src = (
+        'catch (Exception e) {}\n'
+        'catch (Exception e) { }\n'
+        'catch (IOException e) { /* ignored */ }\n'
+        'catch (Exception e) { // not really handled }\n'
+        'catch (SQLException | IOException e) {}\n'
+        'try { connect(); } catch (Exception e) {}\n'
+        '} catch (Exception e) { }\n'
+        'catch (Exception e) { e.printStackTrace(); }\n'
+        'catch (Exception e) { ex.printStackTrace(); }\n'
+        'catch (Exception e) { return null; }\n'
+        'catch (IOException e) { return false; }\n'
+        'catch (RuntimeException e) { return 0; }\n'
+        'catch (Exception e) { return; }\n'
+        'catch (Exception e){ e.printStackTrace();}\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R092-javaexcept"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaexcept_handled_exceptions_and_non_java_quiet():
+    """R092-javaexcept stays quiet for catch blocks that act on the
+    exception (rethrow, log-with-cause, cleanup, Optional fallback,
+    interrupt), for R087-style detail leakage to the response writer, for
+    Python except-swallowing (B001), and for comment/string reproductions."""
+    src = (
+        'catch (Exception e) { throw new BizException("failed", e); }\n'
+        'catch (IOException e) { throw new RuntimeException(e); }\n'
+        'catch (Exception e) { throw e; }\n'
+        'try (InputStream in = Files.newInputStream(p)) { read(in); } catch (IOException e) { throw new MyError(e); }\n'
+        'catch (Exception e) { log.error("op failed", e); return null; }\n'
+        'catch (Exception e) { LOGGER.warn("ignoring", e); }\n'
+        'catch (NoSuchElementException e) { return Optional.empty(); }\n'
+        'catch (IOException e) { e.printStackTrace(); throw new RuntimeException(e); }\n'
+        'catch (Exception e) { e.printStackTrace(response.getWriter()); }\n'
+        'catch (Exception e) { Thread.currentThread().interrupt(); }\n'
+        'String s = "catch (Exception e) {}";\n'
+        '// catch (Exception e) { e.printStackTrace(); }\n'
+        '//catch (Exception e) {}\n'
+        '/* catch (Exception e) { e.printStackTrace(); } */\n'
+        'catch (Exception e) { cleanup(); return; }\n'
+        'catch (Exception e) { counter++; }\n'
+        'catch (Exception e) { return Optional.of(result); }\n'
+        'void f() { try { g(); } catch (Exception e) { handle(e); } }\n'
+        'catch (Exception e) { return getDefault(); }\n'
+        'except Exception:\n'
+        '    pass\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R092-javaexcept"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4546,6 +4605,7 @@ def test_every_rule_has_test_exposure():
         "R089-javazip",
         "R090-javaupload",
         "R091-javaperm",
+        "R092-javaexcept",
     }
     assert exposed <= rids
     uncovered = rids - exposed

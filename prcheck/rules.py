@@ -3033,6 +3033,39 @@ _RULE_TUPLES = [
         r"\bFiles\s*\.\s*create(?:File|Directory|Directories)\s*\([^)\n]*asFileAttribute\s*\(\s*PosixFilePermissions\s*\.\s*fromString\s*\(\s*[\"'][rwx-]{6}(?:[rwx-]{2}w|[rwx-]w[rwx-]|w[rwx-]{2})[\"']\s*\)\s*\)[^)\n]*\))",
         "Java exposes a file or directory to every local user — CWE-732 incorrect permission assignment. File/Path setters with the two-argument ownerOnly=false form (file.setReadable(true, false), setWritable/setExecutable), Files.setPosixFilePermissions with a fromString mode whose 'others' group grants write (rwxrwxrwx, rw-rw-rw-), OTHERS_*/GROUP_* PosixFilePermission enums, createFile/createDirectory/createDirectories carrying a permissive asFileAttribute, and exec'd chmod 777/0777 all let any account read, tamper with or delete the artifact (a world-writable keystore, config, cron or web-root entry). Grant the least privilege the resource needs: keep owner-only modes (rw------- / 600 / 700), reach for the ownerOnly=true variants or Files.createFile + asFileAttribute(fromString('rw-------')), and never chmod a sensitive path world-writable. Owner-only single-arg setters, setReadable/setWritable calls that only remove access, 'rwxr-xr-x'-class modes, plain variable permission lists, safe chmod 644, R053-javaexec concatenated-command forms and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R092-javaexcept",
+        "security",
+        "high",
+        "Java exception swallowed: catch block with an empty/comment-only body, a bare printStackTrace() to stderr, or a silent literal-default return that hides the failure (CWE-390)",
+        # CWE-390 (Detection of Error Condition Without Action) / CWE-248
+        # (Uncaught Exception) / CWE-703 (Improper Check or Handling of
+        # Exceptional Conditions) / CWE-754 (Improper Check for Unusual
+        # Exceptional Conditions): the sink is a catch block that catches an
+        # exception and does nothing meaningful — an empty or comment-only
+        # body ('catch (Exception e) {}', '/* ignored */', '// not really
+        # handled'), a body that only calls e.printStackTrace() to stderr and
+        # then falls through as if nothing happened, or a body that silently
+        # returns a literal default (null/false/0/true or a bare 'return;')
+        # so the caller sees a 'normal' result and the failure disappears.
+        # Security-relevant failures (auth failures, crypto errors, parse of
+        # untrusted input, service-unavailable) get masked, and a null /
+        # "success" value keeps flowing into authorization or business logic.
+        # Handling that takes action — rethrow/throw new (wrapping), logging
+        # the exception object (log.error("…", e)), returning Optional.empty()
+        # / a computed fallback, cleanup, interrupt(), or acting on e — is the
+        # responsible side and stays quiet, as does detail leakage to the
+        # response writer (R087-javaerr, CWE-209), Python except-swallowing
+        # (B001), and comment/string-literal reproductions.  Java sources are
+        # case-sensitive CamelCase, so no inline flag.  Single-line contract.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bcatch\s*\([^)\n]*\)\s*\{\s*(?:/\*[^*]*\*/\s*|//[^\n]*\s*)?\}\s*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bcatch\s*\([^)\n]*\)\s*\{\s*[A-Za-z_]\w*\s*\.\s*printStackTrace\s*\(\s*\)\s*;\s*\}\s*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bcatch\s*\([^)\n]*\)\s*\{\s*\breturn\s*(?:null|false|0|true)?\s*;\s*\}\s*)",
+        "Java silently swallows an exception — CWE-390 detection of error condition without action (and the CWE-248 / CWE-703 / CWE-754 siblings). A catch block with an empty or comment-only body ('catch (Exception e) {}', '/* ignored */', '// not really handled'), a body whose only statement is e.printStackTrace() to stderr before falling through, or a body that returns a literal default (null/false/0/true, bare 'return;') makes the program 'succeed' as if the guarded operation had worked. For security-relevant operations — authentication, signature/crypto verification, decryption of untrusted input, config/secret loading, remote calls — the masked failure then flows into authorization and business logic as a null or success value, and the incident is invisible in the error path. Catch every failure and take real action: rethrow/wrap (throw new ServiceException('…', e)), record the exception object with a real logger (log.error('…', e)), return Optional.empty() or a deliberate computed fallback, clean up and propagate a status. Blocks that act on the exception (rethrow, log-with-cause, cleanup, interrupt()), leak detail to the response writer (R087-javaerr), Python except-swallowing (B001) and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
