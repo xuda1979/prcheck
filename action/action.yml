@@ -1,6 +1,6 @@
 name: "prcheck"
 description: "PR security checklist + OpenAPI changelog gate"
-author: "xuda1979"
+author: "Xu Da (许达)"
 inputs:
   diff:
     description: >

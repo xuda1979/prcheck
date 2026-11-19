@@ -66,14 +66,16 @@ all rights to pursue legal remedies, including but not limited to damages.
 
 - 著作权人：许达（Xu Da）
 - 工作单位：中国移动研究院
-- GitHub：https://github.com/xuda1979
+- 联系方式：按官方对外发布渠道公布的邮箱与联系方式申请，或通过本仓库
+  公开页面的联系方式入口提交商业授权申请。
 - 商业授权以双方签署的书面《商业授权协议》为准。
 
 For commercial license inquiries, please contact the copyright holder:
 
 - Copyright Holder: Xu Da (许达)
 - Affiliation: China Mobile Research Institute (中国移动研究院)
-- GitHub: https://github.com/xuda1979
+- Contact: submit a commercial license request via the contact channel
+  published on the official distribution page of this repository.
 - Commercial authorization is effective only upon execution of a written
   commercial license agreement between the parties.
 
