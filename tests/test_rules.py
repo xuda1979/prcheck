@@ -4502,6 +4502,80 @@ def test_mybatis_parameterized_or_placeholder_or_unrelated_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R094-mybatis"], issues
 
 
+def test_javanosql_document_queries_built_from_untrusted_input_flagged():
+    """R095-javanosql flags Java Mongo-driver query documents built from
+    concatenated or request-derived input — $where/$function documents,
+    Document.parse, collection find/findOne/countDocuments/findAndModify fed
+    "{...}", and BasicQuery — CWE-943 NoSQL injection."""
+    src = (
+        'new Document("$where", "this.x == \'" + username + "\'")\n'
+        'new BasicDBObject("$where", "this.a == \'" + req.getParameter("q") + "\'")\n'
+        'new Document("$function", "function() { return this.b == \'" + input + "\'; }")\n'
+        'new BasicDBObject("$function", "function(){" + payload + "}")\n'
+        'userDoc.append("$where", "this.c == \'" + name + "\'")\n'
+        'doc.put("$where", req.getParameter("j"))\n'
+        'doc.append("$function", "function() { return this.n == \'" + n + "\'; }")\n'
+        'Document.parse("{x: \'" + s + "\'}")\n'
+        'BasicDBObject.parse("{y: " + v + "}")\n'
+        'coll.find("{name: \'" + name + "\'}")\n'
+        'users.find("{role: \'" + role + "\'}")\n'
+        'db.getCollection("accounts").findOne("{uid: \'" + uid + "\'}")\n'
+        'stats.countDocuments("{age: {$gt: " + minAge + "}}")\n'
+        'db.getCollection("c").findAndModify("{x: \'" + x + "\'}", new Document("a", 1))\n'
+        'new BasicQuery("{x: \'" + x + "\'}")\n'
+        'items.findOne("{sku: \'" + sku + "\'}")\n'
+        'new Document("$where", "function() { return this.n == \'" + n + "\'; }")\n'
+        'doc.append("$where", req.getParameter("w"))\n'
+        'coll.countDocuments("{status: \'" + status + "\'}")\n'
+        'Document.parse("{n: \'" + req.getParameter("n") + "\'}")\n'
+        'new BasicQuery("{a: \'" + a + "\'}")\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    hits = [i for i in issues if i.rule_id == "R095-javanosql"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javanosql_literal_or_bound_documents_stay_quiet():
+    """R095-javanosql stays quiet for the safe side: bound two-arg field
+    documents, literal JSON strings (with or without escaped quotes), taint
+    sources without a sink, comment/string-literal reproductions, plain
+    Map.put, and Python/SQL lines."""
+    src = (
+        'new Document("name", "Alice")\n'
+        'BasicDBObject obj = new BasicDBObject("age", 30);\n'
+        'doc.append("name", "Bob");\n'
+        'coll.find();\n'
+        'coll.find(new Document("name", "x"));\n'
+        'Document.parse("{\\"a\\": 1}");\n'
+        'BasicDBObject.parse("{\\"b\\": 2}");\n'
+        'coll.find("{status: \'active\'}");\n'
+        'users.findOne("{uid: \'U-1\'}");\n'
+        'req.getParameter("name");\n'
+        'db.getCollection("accounts").findOne("{\\"uid\\": \\"U-1\\"}");\n'
+        'new BasicDBObject("$where", "this.a == 1");\n'
+        'doc.put("$where", "this.a == 1");\n'
+        'new BasicDBObject("$function", "f(){}");\n'
+        '// new Document("$where", "this.x == \'" + username + "\'")\n'
+        'String q = "coll.find(\\"{x: \'" + s + "\'}\\")";\n'
+        'logger.info("new BasicQuery(\\"{x: \'" + x + "\'}\\")");\n'
+        'String w = "$where";\n'
+        'xml = "<query where=\\"\'" + x + "\'\\">";\n'
+        'db.getCollection("c").find("{x: 1}");\n'
+        'new Document("user", req.getParameter("u"));\n'
+        'query.fields().include("name");\n'
+        'result = coll.find(queryBuilder).limit(10);\n'
+        'ObjectMapper mapper = new ObjectMapper();\n'
+        'mapper.readValue("{x: " + x + "}", Map.class);\n'
+        'String s = "SELECT * FROM t WHERE a = \'" + name + "\'";\n'
+        'logger.info("user=" + user);\n'
+        'map.put("where", "1=1");\n'
+        'listner.add("function", x);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src))
+    assert not [i for i in issues if i.rule_id == "R095-javanosql"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4721,6 +4795,7 @@ def test_every_rule_has_test_exposure():
         "R092-javaexcept",
         "R093-javajndi",
         "R094-mybatis",
+        "R095-javanosql",
     }
     assert exposed <= rids
     uncovered = rids - exposed

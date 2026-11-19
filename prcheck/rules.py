@@ -3139,6 +3139,52 @@ _RULE_TUPLES = [
         r"<select\b[^>\n]*(?:resultType|parameterType|resultMap|statementType|keyProperty|keyColumn|useCache|flushCache|fetchSize|databaseId)[^>\n]*(?:>.*|)\$\{(?!\{)[^}\n]*\})",
         "Java injects a MyBatis/Spring mapper ${...} placeholder into SQL — CWE-89 SQL injection. The action is string substitution, not parameter binding: @Select/@Insert/@Update/@Delete/@Query annotations and mapper XML <select>/<insert>/<update>/<delete>/<sql> snippets that interpolate ${...} splice the raw value into the statement text, so dynamic predicates ('${username}', '${name}'), IN-lists ('${ids}'), column/order-by names ('${tableName}', ORDER BY ${col}), VALUES tuples ('${role}') and reusable <sql> fragments ('${columns}') let an attacker alter the query shape or union a second one. Switch every dynamic value to the #{...} placeholder (PreparedStatement binding — safe for literals), keep ${...} only for structurally fixed, developer-supplied identifiers, and treat request-derived column/order inputs via an allowlist (e.g. Map with user-supplied keys looked up against known-good columns) because no quoting can harden a dynamic identifier. Parameterized #{...} placeholders, Spring @Value('${app.prop}') property placeholders, HTML <select th:field='${...}'> templates, JPA :name / ?1 query params (R056-jpaqli), JDBC executor sinks (R058-jdbcsqli), Python SQL (R005/R012), and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R095-javanosql",
+        "security",
+        "high",
+        "Java NoSQL/Mongo query document built from concatenated or request-derived input (CWE-943)",
+        # CWE-943 (Improper Neutralization of Special Elements in Data Query
+        # Logic) / NoSQL injection: the MongoDB Java driver is told to evaluate a
+        # query whose structure an attacker can steer.  The sink is a driver
+        # document that carries a server-side JS-sanctioned operator — new
+        # Document(...) / new BasicDBObject(...) with a "$where" / "$function"
+        # key (server eval of an attacker-touched predicate), a .append()/.put()
+        # call feeding "$where"/"$function", "Document.parse" /
+        # "BasicDBObject.parse" of a JSON string, a collection query call
+        # (find / findOne / countDocuments / findAndModify / findOneAndUpdate /
+        # findOneAndReplace — directly or after .getCollection("...")) handed a
+        # "{...}" JSON string, or "new BasicQuery("{...")" — where the same line
+        # also carries a taint token: a quoted fragment spliced with '+'
+        # ('"this.x == \'" + username + "\'"', '{x: ' + v) or a request
+        # accessor result (request/req .getParameter()/getHeader()/...).  A
+        # value that reaches $where runs as server-side JS; a $gt / key-name
+        # fragment an attacker bends flips the whole predicate ('{"id":
+        # {"$ne": 1}}' bypasses id checks, {'x': {"$nin": [...]}} skips a
+        # blacklist).  The safe side is the two-argument field constructor
+        # Document/BasicDBObject(key, value) — this levelled query routes the
+        # value as a bound document field, not as query logic — plus literal
+        # JSON strings with no source on the line and plain java.util.Map.put
+        # (which is not the Mongo driver).  Distinct from R028-nosql
+        # (CWE-943) which owns the Python pymongo family (.find()/
+        # .find_one()/.count_documents() fed a wholesale request dict / $where)
+        # — nothing covers the Java Mongo driver today; from the SQL side
+        # R056-jpaqli / R058-jdbcsqli / R094-mybatis (CWE-89) and R055-spelinj
+        # (CWE-917) own JDBC/JPA/SpEL sinks, none of which is a driver document
+        # builder.  Java sources are case-sensitive CamelCase, so no inline
+        # flag.  Single-line contract.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+(?:Document|BasicDBObject)\s*\([^)\n]*\$(?:where|function)(?=(?:[^)\n]|\([^)\n]*\))*(?:[\"']\s*\+|(?:request|req)\w*\s*\.\s*get[A-Z]\w*\s*\())(?:[^)\n]|\([^)\n]*\))*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[A-Za-z_]\w*(?:\(\s*\))?\s*\.\s*(?:append|put)\s*\(\s*[\"']\$(?:where|function)[\"']\s*,(?=(?:[^)\n]|\([^)\n]*\))*(?:[\"']\s*\+|(?:request|req)\w*\s*\.\s*get[A-Z]\w*\s*\())(?:[^)\n]|\([^)\n]*\))*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:Document|BasicDBObject)\s*\.\s*parse\s*\(\s*[\"']\{(?=(?:[^)\n]|\([^)\n]*\))*(?:[\"']\s*\+|(?:request|req)\w*\s*\.\s*get[A-Z]\w*\s*\())(?:[^)\n]|\([^)\n]*\))*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"[A-Za-z_]\w*\s*\.\s*(?:(?:getCollection|collection)\s*\(\s*[\"'][^\"'\n]*[\"']\s*\)\s*\.\s*)?(?:find|findOne|countDocuments|findAndModify|findOneAndUpdate|findOneAndReplace)\s*\(\s*[\"']\{(?=(?:[^)\n]|\([^)\n]*\))*(?:[\"']\s*\+|(?:request|req)\w*\s*\.\s*get[A-Z]\w*\s*\())(?:[^)\n]|\([^)\n]*\))*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\bnew\s+BasicQuery\s*\(\s*[\"']\{(?=(?:[^)\n]|\([^)\n]*\))*(?:[\"']\s*\+|(?:request|req)\w*\s*\.\s*get[A-Z]\w*\s*\())(?:[^)\n]|\([^)\n]*\))*)",
+        "Java NoSQL injection (CWE-943): a Mongo Java-driver query document whose structure an attacker can bend. The driver is asked to evaluate something built from concatenated or request-derived input on the same line — a new Document/BasicDBObject with a $where/$function operator, an .append()/.put(\"$where\"|...) call, a Document/BasicDBObject.parse of a JSON string, a collection find/findOne/countDocuments/findAndModify/findOneAndUpdate/findOneAndReplace handed a \"{...}\" JSON string, or a new BasicQuery(\"{...\"). A user-controlled value that lands in $where runs as server-side JavaScript; one spliced into any of these query documents can flip predicates ({'id': {'$ne': 1}}, $gt/$nin bends) and skip authorization or filter checks. Prefer the typed field form Document/BasicDBObject(key, value) so the value stays a bound field instead of query logic, never concatenate request data into a query string, and for any flow that must build a query from user hints map them through a fixed allowlist of known-good predicates. Two-argument field constructors, pure literal query strings, plain Map.put, Python pymongo calls (R028-nosql), JDBC/JPA/SpEL sinks (R056/R058/R094/R055), and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
