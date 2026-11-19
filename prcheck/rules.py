@@ -3419,6 +3419,61 @@ _RULE_TUPLES = [
         r"\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*(?:setHeader|addHeader)\s*\(\s*(?![^,\n]*['\"]Location['\"])[^,\n]*,\s*(?!['\"])[a-z_]\w*\s*\?\s*[^,;\n]*[a-z_]\w*[^,;\n]*\s*:\s*[^,;\n]*)",
         "Java response header whose VALUE is written from a concatenated (identifier + literal, or a + b), builder-derived (StringBuilder.toString(), append(...).toString(), fluent .build()), non-request accessor (session.getParameter(...), ...) or ternary expression — the shapes R065-java4xx doesn't cover, on the same CWE-113 CRLF-injection/response-splitting sink surface (HttpServletResponse.setHeader/addHeader on response/resp/res/httpResponse/httpServletResponse). A CR/LF embedded in such a value terminates the header early so the attacker can inject extra headers, cookies or a spliced body. Sanitize the value (strip CR/LF, allowlist safe characters), or use validated server-side constants; never reflect request-derived data into any header without neutralization. 'Location' as the header name belongs to R060-openredir; literal name+value pairs, bare request lookups, constant/status/int writes, header reads and non-response receivers stay quiet",
     ),
+    (
+        "R100-javaxexp",
+        "security",
+        "high",
+        "Java XML parser factory/reader configured to enable external entity expansion or disable hardening on any parser variable: setExpandEntityReferences(true), SAX external-general/parameter-entities or Apache load-external-dtd setFeature true, disallow-doctype-decl false, accessExternalDTD / isSupportingExternalEntities set to a non-empty value or true, IS_SUPPORTING_EXTERNAL_ENTITIES=true, setXIncludeAware(true) (CWE-776)",
+        # CWE-776 (Unrestricted Expansion of Entities, "billion laughs"):
+        # R062-javaxxe owns the PARSE-side sink — a JAXP/DOM4J parser fed
+        # client-controlled input — and explicitly keeps factory
+        # construction/setup lines (setFeature/setProperty hardening,
+        # disallow-doctype-decl) quiet.  R100-javaxexp closes the
+        # CONFIG-side gap on the SAME parser receivers (any lowercase
+        # camelCase factory/builder/parser/reader/inputFactory/xmlReader
+        # variable): code that turns entity expansion ON or hardening OFF.
+        # Branch layout (single-line contract; each branch is the shared
+        # (?<!...) comment/string guard + inner + ONE unescaped ')' closing
+        # the (?: group):
+        #   BR1 setExpandEntityReferences(true)
+        #   BR2 setFeature(external-general|external-parameter-entities,
+        #       true) — the two SAX expansion switches
+        #   BR3 setFeature(load-external-dtd, true) — Apache DTD loading
+        #   BR4 setFeature(disallow-doctype-decl, false) — hardening OFF
+        #   BR5 setProperty(accessExternalDTD | isSupportingExternalEntities,
+        #       non-empty quoted value or true) — XMLConstants / StAX
+        #       expansion switches
+        #   BR6 setProperty(IS_SUPPORTING_EXTERNAL_ENTITIES constant, true)
+        #   BR7 setXIncludeAware(true) — enables XInclude processing
+        # The literal http:// URLs inside the feature/property arguments
+        # make R010 (insecure-http-URL scanner) fire incidentally on the
+        # same lines; R010 is a separate low-severity family, not semantic
+        # overlap.  The hardened/disabled/safe side stays quiet: the same
+        # features set false, setExpandEntityReferences(false), an empty
+        # accessExternalDTD string, unrelated features (validation/schema/
+        # namespaces), entityResolver replacement, factory construction
+        # lines and comment/string-literal reproductions (shared guard).
+        # Unlike R010, an https:// URL (or a bare constant) still fires via
+        # the method names; unlike R062, this rule fires WITHOUT any
+        # parse()/read() call or request-derived input — configuring a
+        # parser to expand entities is a defect in itself.  Java sources
+        # are case-sensitive CamelCase, so no inline flag.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[A-Za-z_]\w*\s*\.\s*setExpandEntityReferences\s*\(\s*true\s*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[A-Za-z_]\w*\s*\.\s*setFeature\s*\(\s*[\"']http://xml\.org/sax/features/(?:external-general-entities|external-parameter-entities)[\"']\s*,\s*true\s*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[A-Za-z_]\w*\s*\.\s*setFeature\s*\(\s*[\"']http://apache\.org/xml/features/nonvalidating/load-external-dtd[\"']\s*,\s*true\s*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[A-Za-z_]\w*\s*\.\s*setFeature\s*\(\s*[\"']http://apache\.org/xml/features/disallow-doctype-decl[\"']\s*,\s*false\s*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[A-Za-z_]\w*\s*\.\s*setProperty\s*\(\s*[\"'](?:http://javax\.xml\.XMLConstants/accessExternalDTD|javax\.xml\.stream\.isSupportingExternalEntities)[\"']\s*,\s*(?:[\"'][^\"']+[\"']|true)\s*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[A-Za-z_]\w*\s*\.\s*setProperty\s*\(\s*(?:[A-Za-z_]\w*\s*\.\s*)?IS_SUPPORTING_EXTERNAL_ENTITIES\s*,\s*true\s*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b[A-Za-z_]\w*\s*\.\s*setXIncludeAware\s*\(\s*true\s*)",
+        "A Java XML factory/reader is configured to EXPAND external entities or to switch OFF the hardening that prevents it — the configuration side of CWE-776 (unbounded entity expansion, 'billion laughs'; also feeds CWE-611 XXE). With setExpandEntityReferences(true), external-general/parameter-entities=true, load-external-dtd=true, disallow-doctype-decl=false, accessExternalDTD / isSupportingExternalEntities set to a non-empty value, IS_SUPPORTING_EXTERNAL_ENTITIES=true or setXIncludeAware(true), a crafted document can nest entity declarations to exhaust memory/CPU or pull external resources. Configure the hardened side instead: disallow-doctype-decl=true, external-general-entities=false, external-parameter-entities=false, load-external-dtd=false, accessExternalDTD/accessExternalSchema='' (empty), and no XInclude/XPath expansion; prefer a safe, schema-less in-memory parser. R062-javaxxe flags parsing untrusted input; R100-javaxexp flags the configuration that makes expansion possible — together they close the XXE/entity-expansion surface (R010 firing on these lines is its unrelated insecure-http-URL scan)",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

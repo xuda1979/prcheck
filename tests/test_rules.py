@@ -4817,6 +4817,63 @@ def test_java4hdr_literal_or_r065_covered_header_lines_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R099-java4hdr"], issues
 
 
+def test_javaxexp_entity_expansion_enabled_flagged():
+    """R100-javaxexp flags Java XML parser configuration that ENABLES
+    external entity expansion or DISABLES the hardening that would stop it
+    (CWE-776 unbounded entity expansion): setExpandEntityReferences(true),
+    the SAX external-general/parameter-entities and Apache
+    load-external-dtd setFeature switches, disallow-doctype-decl=false,
+    accessExternalDTD / isSupportingExternalEntities setProperty with a
+    non-empty value, IS_SUPPORTING_EXTERNAL_ENTITIES=true and
+    setXIncludeAware(true) on any camelCase factory/builder/parser/
+    reader/inputFactory/xmlReader variable."""
+    src = (
+        'dbf.setExpandEntityReferences(true);\n'
+        'factory.setFeature("http://xml.org/sax/features/external-general-entities", true);\n'
+        'saxParser.setFeature("http://xml.org/sax/features/external-parameter-entities", true);\n'
+        'dbf.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", true);\n'
+        'xmlReader.setFeature("http://apache.org/xml/features/disallow-doctype-decl", false);\n'
+        'dbf.setProperty("http://javax.xml.XMLConstants/accessExternalDTD", "all");\n'
+        'inputFactory.setProperty("javax.xml.stream.isSupportingExternalEntities", true);\n'
+        'fact.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, true);\n'
+        'docBuilder.setXIncludeAware(true);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R100-javaxexp"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaxexp_hardened_parser_config_stays_quiet():
+    """R100-javaxexp stays quiet for the hardened/safe side: the same
+    features set to false, setExpandEntityReferences(false), an empty
+    accessExternalDTD string, unrelated features (validation/schema/
+    namespaces), entityResolver replacement, factory construction lines,
+    and comment/string-literal reproductions."""
+    src = (
+        'dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);\n'
+        'dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);\n'
+        'dbf.setExpandEntityReferences(false);\n'
+        'dbf.setProperty("http://javax.xml.XMLConstants/accessExternalDTD", "");\n'
+        'dbf.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);\n'
+        'dbf.setXIncludeAware(false);\n'
+        'saxReader.setEntityResolver(new SafeResolver());\n'
+        '// dbf.setExpandEntityReferences(true);\n'
+        'logger.info("dbf.setFeature(\\"http://xml.org/sax/features/external-general-entities\\", true)");\n'
+        'factory.setFeature("http://apache.org/xml/features/validation/schema", true);\n'
+        'dbf.setFeature("http://xml.org/sax/features/namespaces", true);\n'
+        'f.setProperty("some.other.property", "value");\n'
+        'DocumentBuilder db = DocumentBuilderFactory.newInstance().newDocumentBuilder();\n'
+        'inputFactory.setProperty("javax.xml.stream.isSupportingExternalEntities", false);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    # R010 (insecure-http-URL scanner) fires incidentally on the literal
+    # http:// feature arguments — that is a separate low-severity family,
+    # not R100 overlap; only R100 must be absent here.
+    for i in issues:
+        assert i.rule_id != "R100-javaxexp", (i.rule_id, i.line, i.snippet)
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -5041,6 +5098,7 @@ def test_every_rule_has_test_exposure():
         "R097-javajexl",
         "R098-javatlsweak",
         "R099-java4hdr",
+        "R100-javaxexp",
     }
     assert exposed <= rids
     uncovered = rids - exposed
