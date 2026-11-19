@@ -3185,6 +3185,80 @@ _RULE_TUPLES = [
         r"\bnew\s+BasicQuery\s*\(\s*[\"']\{(?=(?:[^)\n]|\([^)\n]*\))*(?:[\"']\s*\+|(?:request|req)\w*\s*\.\s*get[A-Z]\w*\s*\())(?:[^)\n]|\([^)\n]*\))*)",
         "Java NoSQL injection (CWE-943): a Mongo Java-driver query document whose structure an attacker can bend. The driver is asked to evaluate something built from concatenated or request-derived input on the same line — a new Document/BasicDBObject with a $where/$function operator, an .append()/.put(\"$where\"|...) call, a Document/BasicDBObject.parse of a JSON string, a collection find/findOne/countDocuments/findAndModify/findOneAndUpdate/findOneAndReplace handed a \"{...}\" JSON string, or a new BasicQuery(\"{...\"). A user-controlled value that lands in $where runs as server-side JavaScript; one spliced into any of these query documents can flip predicates ({'id': {'$ne': 1}}, $gt/$nin bends) and skip authorization or filter checks. Prefer the typed field form Document/BasicDBObject(key, value) so the value stays a bound field instead of query logic, never concatenate request data into a query string, and for any flow that must build a query from user hints map them through a fixed allowlist of known-good predicates. Two-argument field constructors, pure literal query strings, plain Map.put, Python pymongo calls (R028-nosql), JDBC/JPA/SpEL sinks (R056/R058/R094/R055), and comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R096-javaxquery",
+        "security",
+        "high",
+        "Java XSLT/XQuery expression built by concatenation or fed request-derived input (CWE-643)",
+        # CWE-643 (Improper Neutralization of Data within XPath/XQuery
+        # Expressions) — the XSLT/XQuery side of the XML query family.  The
+        # sink is a stylesheet/query evaluation call whose expression an
+        # attacker can steer: JAXP TransformerFactory/SAXTransformerFactory
+        # .newInstance().newTransformer/newTemplates/newTransformerHandler
+        # (or the factory/tf/transformerFactory receiver form) handed a
+        # new StreamSource("..." ...), a transformer/transformerHandler
+        # .transform(new StreamSource(...), ...), the XQJ API
+        # (xqDataSource/xqds/xqConnection/xqc/connection/conn receiver's
+        # prepareExpression/createExpression, optionally chained after
+        # .getConnection()) and the Saxon xquery/xq receiver's
+        # evaluate/executeQuery/prepare — where the same line also carries a
+        # taint token: a quoted fragment spliced with '+' ('"style_" +
+        # theme'), a request accessor result (request/req .getParameter()/
+        # getHeader()/getQueryString()/getRequestURI()/getRequestURL()/
+        # getPathInfo()/getInputStream()/getReader()/getParameterValues())
+        # or a builder/toString()/concat()/format() method chain.  An
+        # attacker who controls a piece of the XSLT — an <xsl:import>/<xsl:
+        # include> href, an <xsl:param> text node, a select/match predicate
+        # or a name token — can run server-side code in the JAXP extension
+        # function space or read arbitrary nodes; an XQuery predicate
+        # assembled from input can subvert the flwor/let-where shape
+        # (boolean tautologies, comment-out of the filter) and exfiltrate
+        # data.  The safe side is a literal stylesheet/XQuery with no source
+        # on the line, factory construction and property setup
+        # (setOutputProperty), StreamSource creation alone, XQDataSource
+        # construction alone, and non-query methods on those receivers.
+        # Distinct from R059-xpathjava (CWE-643) which owns the
+        # javax.xml.xpath evaluate/compile/evaluateExpression and DOM4J
+        # selectNodes/selectSingleNode families — nothing covers JAXP
+        # transformers / XQJ / Saxon today; R078-javatpl is the
+        # Velocity/FreeMarker/Thymeleaf template-engine family, R062-javaxxe
+        # (CWE-611) owns parse/read sinks and explicitly keeps
+        # "transformers/serializers" quiet, and the SQL/XPath/SpEL sinks
+        # (R056/R058/R059/R094/R055) are a different expression language.
+        # Java sources are case-sensitive CamelCase, so no inline flag.
+        # Single-line contract.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:TransformerFactory|SAXTransformerFactory)\s*\.\s*newInstance\s*\(\s*\)\s*\.\s*(?:newTransformer|newTemplates|newTransformerHandler)\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:TransformerFactory|SAXTransformerFactory)\s*\.\s*newInstance\s*\(\s*\)\s*\.\s*(?:newTransformer|newTemplates|newTransformerHandler)\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getRequestURL|getPathInfo|getInputStream|getReader|getParameterValues)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:TransformerFactory|SAXTransformerFactory)\s*\.\s*newInstance\s*\(\s*\)\s*\.\s*(?:newTransformer|newTemplates|newTransformerHandler)\s*\([^;\n]*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:factory|tf|transformerFactory|saxTransformerFactory)\w*\s*\.\s*(?:newTransformer|newTemplates|newTransformerHandler)\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:factory|tf|transformerFactory|saxTransformerFactory)\w*\s*\.\s*(?:newTransformer|newTemplates|newTransformerHandler)\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getRequestURL|getPathInfo|getInputStream|getReader|getParameterValues)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:factory|tf|transformerFactory|saxTransformerFactory)\w*\s*\.\s*(?:newTransformer|newTemplates|newTransformerHandler)\s*\([^;\n]*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:transformer|xslTransformer|transformerHandler)\w*\s*\.\s*transform\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:transformer|xslTransformer|transformerHandler)\w*\s*\.\s*transform\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getRequestURL|getPathInfo|getInputStream|getReader|getParameterValues)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:transformer|xslTransformer|transformerHandler)\w*\s*\.\s*transform\s*\([^;\n]*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:xqDataSource|xqds|xqConnection|xqc|connection|conn)\w*\s*(?:\.\s*getConnection\s*\(\s*\)\s*)?\.\s*(?:prepareExpression|createExpression)\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:xqDataSource|xqds|xqConnection|xqc|connection|conn)\w*\s*(?:\.\s*getConnection\s*\(\s*\)\s*)?\.\s*(?:prepareExpression|createExpression)\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getRequestURL|getPathInfo|getInputStream|getReader|getParameterValues)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:xqDataSource|xqds|xqConnection|xqc|connection|conn)\w*\s*(?:\.\s*getConnection\s*\(\s*\)\s*)?\.\s*(?:prepareExpression|createExpression)\s*\([^;\n]*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:xquery|xq)\w*\s*\.\s*(?:evaluate|executeQuery|prepare)\s*\([^;\n]*['\"]\s*\+\s*(?!['\"\d])[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:xquery|xq)\w*\s*\.\s*(?:evaluate|executeQuery|prepare)\s*\([^;\n]*(?:request|req)\b\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getRequestURL|getPathInfo|getInputStream|getReader|getParameterValues)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:xquery|xq)\w*\s*\.\s*(?:evaluate|executeQuery|prepare)\s*\([^;\n]*(?!['\"])\s*[a-z_]\w*\s*\.\s*(?:toString|append|build|concat|format|valueOf)\s*\()",
+        "Java XSLT/XQuery injection (CWE-643): a JAXP transformer, XQJ or Saxon query sink handed an expression built from concatenated or request-derived input on the same line — TransformerFactory/SAXTransformerFactory .newInstance().newTransformer/newTemplates/newTransformerHandler (or the factory/tf receiver form) wrapped in new StreamSource(...), a transformer/transformerHandler .transform(new StreamSource(...), ...), the XQJ receiver's prepareExpression/createExpression, and the Saxon xquery/xq evaluate/executeQuery/prepare. Control over a piece of the XSLT (an <xsl:import>/<xsl:include> href, xsl:param text, select/match predicate) lets an attacker run server-side code in the JAXP extension-function space or read arbitrary nodes; a concatenated XQuery predicate can flip the flwor/let-where shape and exfiltrate data. Serve only fixed, developer-controlled stylesheets, keep XQuery templates static and bind variables, and whitelist any user hint before it can influence the query shape. Literal stylesheets/queries, factory/property-setup lines, XQDataSource construction, javax.xml.xpath/DOM4J (R059-xpathjava), template engines (R078-javatpl), XML parse sinks (R062-javaxxe), SQL/XPath/SpEL families (R056/R058/R094/R055), and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

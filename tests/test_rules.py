@@ -4576,6 +4576,76 @@ def test_javanosql_literal_or_bound_documents_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R095-javanosql"], issues
 
 
+def test_javaxquery_xslt_xquery_sinks_built_from_untrusted_input_flagged():
+    """R096-javaxquery flags Java XSLT/XQuery sinks fed concatenated or
+    request-derived input — JAXP TransformerFactory.newInstance()
+    .newTransformer/newTemplates/newTransformerHandler (and factory/tf
+    receiver form) wrapped in StreamSource, transformer/transformerHandler
+    .transform(StreamSource), the XQJ receiver's prepareExpression/
+    createExpression, and Saxon xquery evaluate/executeQuery/prepare —
+    CWE-643 XML query injection."""
+    src = (
+        'TransformerFactory.newInstance().newTransformer(new StreamSource(req.getParameter("xsl")));\n'
+        'TransformerFactory tf = TransformerFactory.newInstance().newTemplates(new StreamSource("<?xml version=\\"1.0\\"?><xsl:stylesheet>" + xslBody));\n'
+        'TransformerFactory.newInstance().newTransformerHandler(new StreamSource(sb.toString()));\n'
+        'SAXTransformerFactory.newInstance().newTransformer(new StreamSource(request.getHeader("XSL")));\n'
+        'factory.newTemplates(new StreamSource("/xsl/" + xslName));\n'
+        'tf.newTransformer(new StreamSource(req.getQueryString()));\n'
+        'transformer.transform(new StreamSource(request.getInputStream()), new StreamResult(out));\n'
+        'transformer.transform(new StreamSource("style_" + theme + ".xsl"), result);\n'
+        'transformer.transform(new StreamSource(sb.toString()), new StreamResult(sw));\n'
+        'conn.prepareExpression("let $s := " + search);\n'
+        'xqc.createExpression(req.getParameter("q"));\n'
+        'xqConnection.prepareExpression(searchStringBuilder.toString());\n'
+        'xquery.evaluate("//book[author=\'" + author + "\']");\n'
+        'xquery.executeQuery(req.getParameter("xq"));\n'
+        'xquery.prepare("doc(\'c.xml\')/*[name=\'" + n + "\']");\n'
+        'transformerHandler.transform(new StreamSource("lion" + skin + ".xsl"), result);\n'
+        'SAXTransformerFactory.newInstance().newTransformerHandler(new StreamSource(inputStream2.toString()));\n'
+        'xqds.getConnection().prepareExpression("/xq/" + version);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R096-javaxquery"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javaxquery_literal_or_nonquery_xml_lines_stay_quiet():
+    """R096-javaxquery stays quiet for the safe side: literal stylesheets
+    and XQuery strings, factory/template construction, property setup,
+    taint sources without a sink, comment/string-literal reproductions,
+    XPath/DOM4J, Mongo/JDBC/SQL inserts, and non-query methods on the
+    receivers."""
+    src = (
+        'TransformerFactory tf = TransformerFactory.newInstance();\n'
+        'Transformer transformer = tf.newTransformer();\n'
+        'transformer.transform(new StreamSource("catalog.xsl"), result);\n'
+        'transformer.transform(source, result);\n'
+        'conn.prepareExpression("for $p in doc(\'lib/cat.xml\')/c return $p");\n'
+        'xquery.evaluate("1 + 2");\n'
+        '// TransformerFactory.newInstance().newTransformer(new StreamSource(req.getParameter("xsl")));\n'
+        'String x = "TransformerFactory.newInstance().newTransformer(new StreamSource(" + q + "))";\n'
+        'logger.info("xquery.evaluate(\\"" + q + "\\")");\n'
+        'factory.newTransformer(new StreamSource("literal.xsl"));\n'
+        'XQDataSource xds = new XQDataSource();\n'
+        'Templates t = templates.newTransformer();\n'
+        'transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");\n'
+        'document.selectNodes("//user[name=\'" + n + "\']");\n'
+        'new StreamSource("static.xsl");\n'
+        'coll.find("{x: \'" + s + "\'}");\n'
+        'stmt.executeQuery(sql);\n'
+        'conn.prepareStatement("SELECT " + id);\n'
+        'result = coll.find(queryBuilder).limit(10);\n'
+        'xqResult.execute();\n'
+        'templates.newTransformer(new StreamSource("t.xsl"));\n'
+        'transformer.transform(new SAXSource("normal.xsl"), result);\n'
+        'xquery.evaluateRequest(req);\n'
+        'connection.prepareExpression(literalXq);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R096-javaxquery"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4796,6 +4866,7 @@ def test_every_rule_has_test_exposure():
         "R093-javajndi",
         "R094-mybatis",
         "R095-javanosql",
+        "R096-javaxquery",
     }
     assert exposed <= rids
     uncovered = rids - exposed
