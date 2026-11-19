@@ -4765,6 +4765,58 @@ def test_javatlsweak_strong_or_unrelated_tls_lines_stay_quiet():
     assert not [i for i in issues if i.rule_id == "R098-javatlsweak"], issues
 
 
+def test_java4hdr_response_header_derived_value_flagged():
+    """R099-java4hdr flags Java HTTP response headers whose VALUE is written
+    from a shape R065-java4xx misses (CWE-113 CRLF injection / response
+    splitting): reversed concat (identifier + literal), two-identifier
+    concat (a + b), builder results (sb.toString(), append(...).toString(),
+    fluent .build()), non-request accessors (session.getParameter(...)) and
+    ternary values carrying an identifier, on response/resp/res/
+    httpResponse/httpServletResponse.setHeader/addHeader."""
+    src = (
+        'resp.addHeader("Set-Cookie", userControlled + "=x");\n'
+        'response.setHeader("X-Id", userId + "!");\n'
+        'resp.addHeader("X-Trace", sb.toString());\n'
+        'response.setHeader("X-Build", builder.append(userInput).toString());\n'
+        'response.addHeader("X-Nonce", nonce + suffix);\n'
+        'response.addHeader("X-Sess", session.getParameter("sid"));\n'
+        'resp.setHeader("X-Dbg", debug ? flag + "" : fallback);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R099-java4hdr"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_java4hdr_literal_or_r065_covered_header_lines_stay_quiet():
+    """R099-java4hdr stays quiet for the covered/safe side: literal
+    name+value pairs, literal-first concatenations (R065-java4xx's shape),
+    bare-variable values (R065's shape), 'name - region' hyphen concats
+    (R065's shape), 'Location' header names (R060-openredir owns redirect
+    targets), request-accessor values and names (R065's shape), constant/
+    status/int writes, non-response receivers (wrapper/soup setHeader), and
+    comment/string-literal reproductions."""
+    src = (
+        'response.setHeader("Set-Cookie", "JSESSIONID=" + sessionId + "; Secure");\n'
+        'resp.setHeader("Content-Type", "application/json");\n'
+        'response.setHeader("Cache-Control", "no-store");\n'
+        'response.setStatus(302); resp.setHeader("Location", uri);\n'
+        'response.sendRedirect("/login?next=" + nextUrl);\n'
+        'response.setHeader("Location", redirect);\n'
+        'response.setHeader(HTTP_HEADER, httpVersion);\n'
+        'wrapper.setHeader("X-Custom", req.getParameter("v"));\n'
+        'response.addHeader("X-Limit", "10");\n'
+        'String name = request.getParameter("name"); soup.setHeader(name, "x");\n'
+        'response.addHeader("X-Info", "p=" + val);\n'
+        'response.setHeader("X-Echo", var);\n'
+        'resp.setHeader("X-Tag", name + "-" + region);\n'
+        '// response.setHeader("X-Reversed", userControlled + "=x");\n'
+        'logger.info("response.addHeader(\\"X-Build\\", builder.append(x).toString())");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R099-java4hdr"], issues
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -4988,6 +5040,7 @@ def test_every_rule_has_test_exposure():
         "R096-javaxquery",
         "R097-javajexl",
         "R098-javatlsweak",
+        "R099-java4hdr",
     }
     assert exposed <= rids
     uncovered = rids - exposed

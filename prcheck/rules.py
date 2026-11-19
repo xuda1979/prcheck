@@ -3367,6 +3367,58 @@ _RULE_TUPLES = [
         r"\bSystem\s*\.\s*setProperty\s*\(\s*['\"]\s*(?:https\.protocols|https\.cipherSuites|jdk\.tls\.(?:client|server)\.protocols|jdk\.tls\.(?:client|server)\.cipherSuites)\s*['\"]\s*,\s*['\"][^'\n]*(?i:sslv2|sslv3|sslv2hello|tlsv1(?:[._][01])?(?!\.?[23](?![0-9]))|rc4|3des|desede|des_cbc|null|export|anon)[^'\n]*['\"])",
         "Java weak TLS protocol/cipher-suite selection (CWE-757): code that pins a legacy or less-secure algorithm for the handshake — SSLContext.getInstance on SSLv2/SSLv3/SSLv2Hello/TLSv1(.0/.1), sslSocket/sslServerSocket/sslEngine.setEnabledProtocols or setEnabledCipherSuites, sslParameters/params.setProtocols or setCipherSuites, or System.setProperty of https.protocols/https.cipherSuites/jdk.tls.client|server.protocols/jdk.tls.client|server.cipherSuites — lets an in-path adversary downgrade the session to a protocol or suite with broken crypto (POODLE/SSLv3, RC4, 3DES, NULL/anon/export), breaking the channel's confidentiality and integrity. Require TLS 1.2+ with AEAD suites only, never enable a weak protocol or suite alongside strong ones, and prefer the JVM's secure defaults over per-site System.setProperty overrides. Trust-all certificate/verifier handling is a separate weakness (R071-javatls, CWE-295); weak digest/signature/cipher algorithm choice is R066-javacrypto (CWE-327); key-size minima are R074-javakeysz (CWE-326); comment/string-literal reproductions stay quiet",
     ),
+    (
+        "R099-java4hdr",
+        "security",
+        "high",
+        "Java HTTP response header set from a concatenated, builder-derived or non-request-accessor value (reversed or two-identifier concat, StringBuilder/append().toString(), .build(), session/other getter, ternary): setHeader/addHeader on the response with a VALUE shape R065-java4xx misses (CWE-113)",
+        # CWE-113 (Improper Neutralization of CRLF Sequences in HTTP Headers):
+        # R065-java4xx owns the request-NAME and literal-first/request-
+        # accessor/bare-variable VALUE shapes on HttpServletResponse header
+        # sinks; R099-java4hdr closes the gap on the SAME sinks
+        # (response/resp/res/httpResponse/httpServletResponse . setHeader/
+        # addHeader) for the VALUE shapes R065 misses — reversed concat
+        # (identifier + "suffix"), two-identifier concat (a + b), builder
+        # results (sb.toString(), append(...).toString() chaining, .build()),
+        # non-request accessors (session.getParameter, ...) and ternary
+        # values that carry an identifier.  A CR/LF in any of these lands in
+        # an outgoing header and splits/corrupts the response the same way
+        # (CWE-113 response splitting).  Branch layout (single-line
+        # contract; the shared (?<!...) guard keeps comment/string-literal
+        # reproductions quiet):
+        #   BR1 reversed concat  header(n, ident + "suffix") — the literal
+        #       must terminate the concatenation ((?!\s*\+)) so R065's
+        #       literal-first chains ("p=" + val) never re-fire
+        #   BR2 two-identifier concat   header(n, a + b)
+        #   BR3 builder toString   header(n, sb.toString())
+        #   BR4 append(...).toString() chain   header(n, b.append(x).toString())
+        #   BR5 fluent builder build   header(n, cfg.build())
+        #   BR6 non-request accessor   header(n, session.getParameter(...)) —
+        #       request|req prefix accessors are R065's territory
+        #   BR7 ternary value carrying an identifier   header(n, c ? x : y)
+        # "Location" as the header name is excluded everywhere (R060-openredir
+        # owns redirect targets).  Literal name+value pairs, bare request
+        # lookups, constant/int/status writes, header READS and non-response
+        # receivers (wrapper/soup setHeader) stay quiet.  Distinct from
+        # R065-java4xx (no overlap: R065's shapes are guarded out here) and
+        # R035-hdrinj (Python/JS only).  Java sources are case-sensitive
+        # CamelCase, so no inline flag.
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*(?:setHeader|addHeader)\s*\(\s*(?![^,\n]*['\"]Location['\"])[^,\n]*,\s*(?!['\"])[a-z_]\w*\s*\+\s*['\"][^'\n]*['\"](?!\s*\+))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*(?:setHeader|addHeader)\s*\(\s*(?![^,\n]*['\"]Location['\"])[^,\n]*,\s*(?!['\"])[a-z_]\w*\s*\+\s*[a-z_]\w*)"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*(?:setHeader|addHeader)\s*\(\s*(?![^,\n]*['\"]Location['\"])[^,\n]*,\s*(?!['\"])[a-z_]\w*\s*\.\s*toString\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*(?:setHeader|addHeader)\s*\(\s*(?![^,\n]*['\"]Location['\"])[^,\n]*,\s*(?!['\"])[a-z_]\w*\s*\.\s*append\s*\([^)\n]*\)(?:\s*\.\s*append\s*\([^)\n]*\))*\s*\.\s*toString\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*(?:setHeader|addHeader)\s*\(\s*(?![^,\n]*['\"]Location['\"])[^,\n]*,\s*(?!['\"])[a-z_]\w*\s*\.\s*build\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*(?:setHeader|addHeader)\s*\(\s*(?![^,\n]*['\"]Location['\"])[^,\n]*,\s*(?!['\"])(?!(?:request|req)\b)[a-z_]\w*\s*\.\s*(?:getParameter|getHeader|getQueryString|getRequestURI)\s*\()"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)"
+        r"\b(?:response|resp|res|httpResponse|httpServletResponse)\s*\.\s*(?:setHeader|addHeader)\s*\(\s*(?![^,\n]*['\"]Location['\"])[^,\n]*,\s*(?!['\"])[a-z_]\w*\s*\?\s*[^,;\n]*[a-z_]\w*[^,;\n]*\s*:\s*[^,;\n]*)",
+        "Java response header whose VALUE is written from a concatenated (identifier + literal, or a + b), builder-derived (StringBuilder.toString(), append(...).toString(), fluent .build()), non-request accessor (session.getParameter(...), ...) or ternary expression — the shapes R065-java4xx doesn't cover, on the same CWE-113 CRLF-injection/response-splitting sink surface (HttpServletResponse.setHeader/addHeader on response/resp/res/httpResponse/httpServletResponse). A CR/LF embedded in such a value terminates the header early so the attacker can inject extra headers, cookies or a spliced body. Sanitize the value (strip CR/LF, allowlist safe characters), or use validated server-side constants; never reflect request-derived data into any header without neutralization. 'Location' as the header name belongs to R060-openredir; literal name+value pairs, bare request lookups, constant/status/int writes, header reads and non-response receivers stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
