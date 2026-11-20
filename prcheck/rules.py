@@ -3776,6 +3776,33 @@ _RULE_TUPLES = [
         "|(?:(?<![/\\w'\\\"*])(?<!/ )(?<!\\* )(?<!//)(?!/\\*)\\b(?:LoggerFactory|LogFactory)\\s*\\.\\s*get(?:Logger|Log)\\s*\\([^)\\n]*?\\)\\s*\\.\\s*(?:info|debug|trace|warn|warning|error|fatal|fine|finer|finest|severe)\\s*\\((?=[^\\n;]*(?<![\\\\])(?:\\\\[rn]|\\\\u000[aAdD]))(?=[^\\n;]*(?:[^\\n;]*(?<![\\\\\\\"])\\\"\\s*\\+\\s*[^\\\")\\s\\d]|[^\\n;]*(?<![\\\"\\w])[A-Za-z_]\\w*(?:\\s*\\.\\s*[A-Za-z_]\\w*(?:\\s*\\(\\s*\\))?)*\\s*\\+\\s*\\\"))[^\\n;]*\\))",
         "A Java logging call writes a message that embeds both a CR/LF control sequence and a concatenation of non-literal data - logger./LOG./LOGGER./log./l.info|debug|trace|warn|warning|error|fatal|fine|finer|finest|severe (or a Logger.getLogger / LoggerFactory.getLogger / LogFactory.getLog chain) receives a string containing \\n, \\r, \\r\\n or a \\u000a/\\u000d/\\u000A/\\u000D unicode newline while the payload is assembled as \"prefix\" + variable or variable + \"suffix\" - CWE-117 log injection. Log aggregators, SIEMs and support consoles parse each record as a line; a CR/LF smuggled in through user-influenced data terminates the record early so the attacker forges fake log lines, plants alarming-but-false events, pollutes dashboards/alerts or poisons downstream parsing. Sanitize the message (strip CR/LF, unicode newlines and control chars), log a fixed-format safe summary instead of raw concatenations, and never echo request-derived values unfiltered into logs. Request-ACCESSOR logging (R084-javalog, CWE-532) and Python/console/System.out sinks (R036-loginj, CWE-117) have their own rules; concatenations without an embedded CR/LF, CR/LF literals with no non-literal payload, non-log sinks, comment/string-literal reproductions and request-accessor whitelists stay quiet",
     ),
+    (
+        # R110-javasessattr: Java servlet HttpSession.setAttribute whose VALUE
+        # argument is request-derived - a request accessor call (getParameter/
+        # getHeader/getQueryString/getRequestURI/getParameterValues/
+        # getParameterMap/getCookies/getInputStream) direct or concatenated -
+        # CWE-384 session data poisoning.  The session object is trusted
+        # server-side state later handlers/JSPs read back for authorization
+        # and redirect decisions, so storing raw request data lets the caller
+        # poison cross-request state.  Single branch:
+        #   GUARD + RECV . setAttribute ( key, <lookahead VALUE> ... )
+        #   RECV = request.getSession(...) chain | session/httpSession/sess id
+        #   VALUE ok when [^;\n]* to the closing paren contains an ACC call
+        # Fires only on the session setAttribute sink with a request-produced
+        # value.  request-scope request.setAttribute, session.getAttribute
+        # reads, non-session receivers (userSession, CacheManager...), literal/
+        # server-side values, request-derived KEYS and comment/string-literal
+        # reproductions stay quiet.  R049-fixatn owns Python session-id
+        # assignment (CWE-384), R103-javasessionexp owns idle timeouts
+        # (CWE-613), R048-cookieset owns cookie tokens.  No inline flag
+        # (Java CamelCase).  Single-line contract.
+        "R110-javasessattr",
+        "security",
+        "high",
+        "Java servlet HttpSession.setAttribute stores a request-derived value into the session - session.setAttribute(\"k\", request.getParameter/getHeader/getQueryString/getRequestURI/getParameterValues/getParameterMap/getCookies/getInputStream) direct or concatenated, receiver session/httpSession/sess or the request.getSession(...) chain - CWE-384 session data poisoning",
+        "(?:(?<![/\\w'\\\"*])(?<!/ )(?<!\\* )(?<!//)(?!/\\*)(?:(?:request|req|httpRequest|httpServletRequest)\\b\\s*\\.\\s*getSession\\s*\\(\\s*[^)\\n]*?\\s*\\)|(?:session|httpSession|sess)\\b)\\s*\\.\\s*setAttribute\\s*\\(\\s*[^,;\\n]*?,\\s*(?=[^;\\n]*(?:request|req|httpRequest|httpServletRequest)\\b\\s*\\.\\s*(?:getParameter|getHeader|getQueryString|getRequestURI|getParameterValues|getParameterMap|getCookies|getInputStream)\\s*\\()[^;\\n]*\\))",
+        "A Java servlet stores a request-controlled value into the users HttpSession with session.setAttribute(key, value). The session is trusted server-side state that survives across requests and feeds authorization decisions (role, userId, isAdmin), redirect targets, per-user settings and CSRF/in-progress-request tokens; when that value comes straight from the HTTP request (request.getParameter/getHeader/getQueryString/getRequestURI/getParameterValues/getParameterMap/getCookies/getInputStream - directly or concatenated into a string) the attacker controls what later handlers, filters and JSPs read back, so cross-request privilege/session data poisoning follows (CWE-384). Validate and normalize request-derived values before storing, store a server-computed identifier or flag instead of the raw input, and treat every later session attribute read as untrusted. Fires only on the HttpSession setAttribute sink whose VALUE is request-produced: request-scope request.setAttribute, session.getAttribute reads, non-session receivers (userSession, CacheManager...), literal/server-side values, request-derived KEYS and comment/string-literal reproductions stay quiet. Siblings: R049-fixatn owns Python session-id assignment (CWE-384), R103-javasessionexp owns session idle timeouts (CWE-613), R048-cookieset owns cookie tokens",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

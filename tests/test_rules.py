@@ -5326,6 +5326,61 @@ def test_javalogcrlf_literal_or_safe_logs_stay_quiet():
     ]
 
 
+def test_javasessattr_request_value_stored_in_session_flagged():
+    """R110-javasessattr flags Java servlet HttpSession.setAttribute whose VALUE
+    argument is request-derived - request.getParameter/getHeader/getQueryString/
+    getRequestURI/getParameterValues/getParameterMap/getCookies/getInputStream
+    called directly or concatenated - across session/httpSession/sess receivers
+    and the request.getSession(...) chain, CWE-384 session data poisoning."""
+    src = (
+        'session.setAttribute("username", request.getParameter("username"));\n'
+        'httpSession.setAttribute("role", req.getHeader("Role"));\n'
+        'sess.setAttribute("note", request.getQueryString());\n'
+        'request.getSession().setAttribute("lang", request.getParameter("lang"));\n'
+        'req.getSession(false).setAttribute("theme", "prefix " + request.getRequestURI());\n'
+        'session.setAttribute("theme", request.getParameter("theme") + " suffix");\n'
+        'session.setAttribute("redir", request.getHeader("Referer"));\n'
+        'httpServletRequest.getSession().setAttribute("uid", request.getParameter("uid"));\n'
+        'session.setAttribute("cursor", "page " + req.getParameter("page") + " end");\n'
+        'session.setAttribute("raw", request.getParameterValues("tags"));\n'
+        'request.getSession(true).setAttribute("page", "page/" + request.getParameter("p"));\n'
+        'session.setAttribute("opts", request.getParameterMap().get("k"));\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R110-javasessattr"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javasessattr_literal_or_unsafe_receiver_stays_quiet():
+    """R110-javasessattr stays quiet for literal/server-side values,
+    request-scope request.setAttribute, session.getAttribute reads,
+    request-derived KEYS, non-session receivers (userSession, CacheManager),
+    unrelated session methods, and comment/string-literal reproductions."""
+    src = (
+        'session.setAttribute("theme", "dark");\n'
+        'httpSession.setAttribute("count", counter);\n'
+        'session.setAttribute("uid", user.getId());\n'
+        'request.setAttribute("name", request.getParameter("name"));\n'
+        'req.getSession().setAttribute("counter", 1);\n'
+        'session.getAttribute("name");\n'
+        'session.setAttribute("msg", "Welcome " + user.getName());\n'
+        '// session.setAttribute("x", request.getParameter("x"));\n'
+        'String s = "session.setAttribute(\\"x\\", req.getParameter(\\"x\\"));";\n'
+        'HttpSession session = request.getSession();\n'
+        'session.setAttribute(request.getParameter("k"), "v");\n'
+        'session.setMaxInactiveInterval(30 * 60);\n'
+        'userSession.setAttribute("lang", request.getParameter("lang"));\n'
+        'CacheManager.setAttribute("region", request.getParameter("region"));\n'
+        'log.info("session.setAttribute(\\"k\\", request.getParameter(\\"k\\"))");\n'
+        'session.setAttribute("exp", new Date().toString());\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R110-javasessattr"], [
+        (i.rule_id, i.line, i.snippet) for i in issues if i.rule_id == "R110-javasessattr"
+    ]
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -5560,6 +5615,7 @@ def test_every_rule_has_test_exposure():
         "R107-javapbeparm",
         "R108-javasslclient",
         "R109-javalogcrlf",
+        "R110-javasessattr",
     }
     assert exposed <= rids
     uncovered = rids - exposed
