@@ -3711,6 +3711,48 @@ _RULE_TUPLES = [
         r"\bnew\s+PBEParameterSpec\s*\(\s*new\s+byte\s*\[\s*(?:[0-9]|1[0-5])\s*\]\s*(?:,\s*[^,)\n]+)*\))",
         "A Java program constructs PBE parameters with insufficient computational effort — CWE-916: a PBEKeySpec(password, salt, iterations) or PBEParameterSpec(salt, iterations) whose iteration count is a constant below the NIST SP 800-132 minimum of 10,000 (e.g. 1000), or whose salt is a constant short literal new byte[n] with n < 16 (below the 128-bit floor), produces a derived key an offline attacker can brute-force in seconds. Password-based encryption is only as strong as the work factor and salt entropy: raise the iteration count to at least 100,000 (or the platform max), use a full-length salt from SecureRandom (new byte[16]; new SecureRandom().nextBytes(salt)), and prefer an adaptive KDF such as PBKDF2 (SecretKeyFactory.getInstance(\"PBKDF2WithHmacSHA256\")) with a high keyIterations value. Literal-password PBEKeySpec forms are R082-javasecret's domain; weak algorithm names are R066-javacrypto's; variable iteration/salt arguments, adequate constants (10000+ iterations, new byte[16]+ salts), high-iteration configs, comment/string-literal reproductions stay quiet",
     ),
+    (
+        # R108-javasslclient: Java HTTP/TLS client wiring that disables
+        # certificate or hostname verification (CWE-295).  Fires when a
+        # trust-all / insecure / accept-all / noop-named SSLContext or
+        # X509TrustManager variable (or NoopHostnameVerifier.INSTANCE) is
+        # wired into a client builder:
+        #   BR1   java.net.http HttpClient.newBuilder().sslContext(<var>) /
+        #         Apache HttpClientBuilder.setSSLContext(<var>)
+        #   BR2   Apache httpClient.setSSLSocketFactory(new
+        #         SSLConnectionSocketFactory(<var>))
+        #   BR3a  standalone new SSLConnectionSocketFactory(<trustAll var>[, any])
+        #   BR3b  new SSLConnectionSocketFactory(<any>, NoopHostnameVerifier.INSTANCE)
+        #   BR4a/b OkHttp .sslSocketFactory(<trustAll var>, <var>) 2-arg - the
+        #         second arg is the trust anchor, so a trustAll name in EITHER
+        #         position fires
+        #   BR5a  builder .hostnameVerifier(NoopHostnameVerifier.INSTANCE | <trustAll var>)
+        #   BR5b  .setHostnameVerifier / .setSSLHostnameVerifier /
+        #         .setDefaultHostnameVerifier(NoopHostnameVerifier.INSTANCE)
+        # R071-javatls owns the trust-all IMPLEMENTATIONS (empty checkServerTrusted
+        # bodies, getAcceptedIssuers null/[], verify->true, sslContext.init(...)
+        # with an inline empty/trustAll TrustManager arg, setDefaultHostnameVerifier
+        # /setHostnameVerifier(trustAll var)); this sibling owns only the WIRING of a
+        # named trust-all/insecure context or the NoopHostnameVerifier constant into
+        # the client.  Generic names (sslContext, trustManager, socketFactory) are
+        # not statically judgeable and stay quiet, as do SSLContext.getInstance()
+        # staging, 1-arg sslSocketFactory(factory) (keeps default trust manager),
+        # adequate hostname verifiers (BROWSER_COMPATIBLE_*), lambda-true partials
+        # (R071's domain), and comment/string-literal reproductions.
+        "R108-javasslclient",
+        "security",
+        "high",
+        "Java HTTP/TLS client wiring explicitly disables certificate or hostname verification: a trust-all/insecure/accepted-all SSLContext or X509TrustManager fed to HttpClient.newBuilder().sslContext, HTTPS setSSLContext, Apache setSSLSocketFactory / new SSLConnectionSocketFactory, OkHttp 2-arg sslSocketFactory, or NoopHostnameVerifier.INSTANCE wired into hostnameVerifier / setHostnameVerifier / setSSLHostnameVerifier / setDefaultHostnameVerifier - CWE-295",
+        r"(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)(?:[A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*(?:\s*\(\s*\))?)*|new\s+[\w.$]+(?:\.[A-Za-z_]\w*)*\s*\(\s*\))\s*\.\s*(?:sslContext|setSSLContext)\s*\(\s*(?:[Tt]rust(?:[_]?[Aa]ll)[A-Za-z0-9_]*|[Ii]nsecure[A-Za-z0-9_]*|[Aa]ccept(?:[_]?[Aa]ll)[A-Za-z0-9_]*|[Nn]oop[A-Za-z0-9_]*)\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)[A-Za-z_]\w*\s*\.\s*setSSLSocketFactory\s*\(\s*new\s+SSLConnectionSocketFactory\s*\(\s*(?:[Tt]rust(?:[_]?[Aa]ll)[A-Za-z0-9_]*|[Ii]nsecure[A-Za-z0-9_]*|[Aa]ccept(?:[_]?[Aa]ll)[A-Za-z0-9_]*|[Nn]oop[A-Za-z0-9_]*)\s*\)\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)\bnew\s+SSLConnectionSocketFactory\s*\(\s*(?:[Tt]rust(?:[_]?[Aa]ll)[A-Za-z0-9_]*|[Ii]nsecure[A-Za-z0-9_]*|[Aa]ccept(?:[_]?[Aa]ll)[A-Za-z0-9_]*|[Nn]oop[A-Za-z0-9_]*)(?:\s*,\s*[^,)\n]+)?\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)\bnew\s+SSLConnectionSocketFactory\s*\(\s*[^,)\n]+?\s*,\s*[Nn]oopHostnameVerifier\s*\.\s*INSTANCE\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)(?:[A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*(?:\s*\(\s*\))?)*|new\s+[\w.$]+(?:\.[A-Za-z_]\w*)*\s*\(\s*\))\s*\.\s*sslSocketFactory\s*\(\s*(?:[Tt]rust(?:[_]?[Aa]ll)[A-Za-z0-9_]*|[Ii]nsecure[A-Za-z0-9_]*|[Aa]ccept(?:[_]?[Aa]ll)[A-Za-z0-9_]*|[Nn]oop[A-Za-z0-9_]*)\s*,\s*[^,)\n]+?\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)(?:[A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*(?:\s*\(\s*\))?)*|new\s+[\w.$]+(?:\.[A-Za-z_]\w*)*\s*\(\s*\))\s*\.\s*sslSocketFactory\s*\(\s*[^,)\n]+?\s*,\s*(?:[Tt]rust(?:[_]?[Aa]ll)[A-Za-z0-9_]*|[Ii]nsecure[A-Za-z0-9_]*|[Aa]ccept(?:[_]?[Aa]ll)[A-Za-z0-9_]*|[Nn]oop[A-Za-z0-9_]*)\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)(?:[A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*(?:\s*\(\s*\))?)*|new\s+[\w.$]+(?:\.[A-Za-z_]\w*)*\s*\(\s*\))\s*\.\s*hostnameVerifier\s*\(\s*(?:[Nn]oopHostnameVerifier\s*\.\s*INSTANCE|(?:[Tt]rust(?:[_]?[Aa]ll)[A-Za-z0-9_]*|[Ii]nsecure[A-Za-z0-9_]*|[Aa]ccept(?:[_]?[Aa]ll)[A-Za-z0-9_]*|[Nn]oop[A-Za-z0-9_]*))\s*\))"
+        r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)(?:[A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*(?:\s*\(\s*\))?)*|new\s+[\w.$]+(?:\.[A-Za-z_]\w*)*\s*\(\s*\))\s*\.\s*(?:setHostnameVerifier|setSSLHostnameVerifier|setDefaultHostnameVerifier)\s*\(\s*[Nn]oopHostnameVerifier\s*\.\s*INSTANCE\s*\))",
+        "A Java HTTP/TLS client is wired with a trust-all or insecure SSLContext / SSLSocketFactory / X509TrustManager (or NoopHostnameVerifier.INSTANCE), silently disabling certificate and hostname verification - CWE-295. The client then accepts any server certificate (including one forged by an attacker) and skips the hostname check, letting a man-in-the-middle intercept every request it sends (credentials, tokens, PII). Build the SSLContext from the platform trust store (trustManagerFactory.init((KeyStore) null)) and verify hostnames against the server's expected CN/SAN, or keep the JDK defaults by not configuring sslContext / sslSocketFactory at all and letting the higher-level builder manage verification; delete the trust-all context and any NoopHostnameVerifier wiring. Trust-all IMPLEMENTATIONS (empty checkServerTrusted bodies, verify->true lambdas, sslContext.init with an inline empty/trustAll TrustManager arg) are R071-javatls's domain; generic-named variables (sslContext, trustManager, socketFactory), 1-arg sslSocketFactory(factory) (keeps the default trust manager), SSLContext.getInstance() staging, adequate named hostname verifiers, and comment/string-literal reproductions stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",

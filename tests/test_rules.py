@@ -5209,6 +5209,65 @@ def test_javapbeparm_adequate_or_variable_pbe_params_stay_quiet():
     ]
 
 
+def test_javasslclient_trust_all_client_wiring_flagged():
+    """R108-javasslclient flags Java HTTP/TLS client wiring that disables
+    certificate or hostname verification: a trust-all / insecure /
+    accept-all / noop-named SSLContext or X509TrustManager fed to
+    HttpClient.newBuilder().sslContext, HTTPS setSSLContext, Apache
+    setSSLSocketFactory / new SSLConnectionSocketFactory, OkHttp 2-arg
+    sslSocketFactory, or NoopHostnameVerifier.INSTANCE wired into the
+    hostnameVerifier / setHostnameVerifier / setSSLHostnameVerifier /
+    setDefaultHostnameVerifier call (CWE-295)."""
+    src = (
+        'HttpClient httpClient = HttpClient.newBuilder().sslContext(trustAllContext).build();\n'
+        'HttpClient.newBuilder().sslContext(trustAllSslContext).build();\n'
+        'builder.sslContext(insecureContext);\n'
+        'CloseableHttpClient client = HttpClientBuilder.create().setSSLContext(trustAllContext).build();\n'
+        'httpClient.setSSLContext(trustAllContext);\n'
+        'httpClient.setSSLSocketFactory(new SSLConnectionSocketFactory(trustAllContext));\n'
+        'socketFactory = new SSLConnectionSocketFactory(trustAllContext);\n'
+        'new SSLConnectionSocketFactory(sslContext, NoopHostnameVerifier.INSTANCE);\n'
+        'client.newBuilder().sslSocketFactory(sslCtx, trustAllX509TrustManager).build();\n'
+        'builder.sslSocketFactory(trustAllCtx, x509TrustManager);\n'
+        'okHttpClient.newBuilder().hostnameVerifier(NoopHostnameVerifier.INSTANCE).build();\n'
+        'client.setHostnameVerifier(NoopHostnameVerifier.INSTANCE);\n'
+        'HttpsURLConnection.setDefaultHostnameVerifier(NoopHostnameVerifier.INSTANCE);\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R108-javasslclient"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javasslclient_adequate_client_wiring_stays_quiet():
+    """R108-javasslclient stays quiet for generic-named contexts, SSLContext
+    staging, keystore-backed setups, adequate named hostname verifiers,
+    R071-domain trust-all implementations, 1-arg sslSocketFactory,
+    comment/string-literal reproductions."""
+    src = (
+        'HttpClient.newBuilder().sslContext(sslContext).build();\n'
+        'builder.sslContext(trustManagerAwareContext);\n'
+        'new SSLConnectionSocketFactory(sslContext);\n'
+        'new SSLConnectionSocketFactory(sslContext, BROWSER_COMPATIBLE_HOSTNAME_VERIFIER);\n'
+        'builder.sslSocketFactory(socketFactory);\n'
+        'builder.sslSocketFactory(sslCtx, trustManager);\n'
+        'SSLContext cs = SSLContext.getInstance("TLS");\n'
+        'initContext.init(keyManagers, defaultTrustManager, new SecureRandom());\n'
+        'sslContext.init(keyManagers, trustAllManagers, new SecureRandom());\n'
+        'conn.setHostnameVerifier((hostname, session) -> true);\n'
+        'conn.setHostnameVerifier(trustAllVerifier);\n'
+        'client.newBuilder().hostnameVerifier((h, s) -> true).build();\n'
+        '// httpClient.setSSLContext(trustAllContext);\n'
+        'String s = "HttpClient.newBuilder().sslContext(trustAllContext).build()";\n'
+        'HttpsURLConnection.setDefaultHostnameVerifier(new SecureHostnameVerifier());\n'
+        'HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R108-javasslclient"], [
+        (i.rule_id, i.line, i.snippet) for i in issues if i.rule_id == "R108-javasslclient"
+    ]
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -5441,6 +5500,7 @@ def test_every_rule_has_test_exposure():
         "R105-javastativ",
         "R106-javaredir",
         "R107-javapbeparm",
+        "R108-javasslclient",
     }
     assert exposed <= rids
     uncovered = rids - exposed
