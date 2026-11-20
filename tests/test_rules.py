@@ -5268,6 +5268,64 @@ def test_javasslclient_adequate_client_wiring_stays_quiet():
     ]
 
 
+def test_javalogcrlf_concat_crlf_message_flagged():
+    """R109-javalogcrlf flags Java logging calls whose message embeds a
+    CR/LF control sequence (\\n, \\r, \\r\\n, \\u000a/\\u000d unicode newline)
+    while the payload is assembled from a non-literal concatenation
+    ("prefix" + var or var + "suffix") - CWE-117 log injection, across plain
+    receivers (logger/LOG/LOGGER/Log/log/l) and Logger.getLogger /
+    LoggerFactory.getLogger / LogFactory.getLog chains."""
+    src = (
+        'logger.info("login failed for user " + username + "\\n");\n'
+        'LOGGER.error("transfer failed: " + user.getName() + "\\r\\n");\n'
+        'Logger.getLogger("A").info("op " + op + "\\r\\n");\n'
+        'LoggerFactory.getLogger("X").warn("cfg " + config.get("mode") + "\\n");\n'
+        'log.debug("state " + st + "\\n\\n");\n'
+        'log.warning("evt " + evt + "\\r");\n'
+        'logger.trace("t " + tr + "\\r\\n");\n'
+        'LOG.fine("m " + msg + "\\n");\n'
+        'LOGGER.finest("s " + s + "\\r");\n'
+        'logger.info(username + " failed\\n");\n'
+        'LOG.severe("fatal " + err + " during " + phase + "\\n");\n'
+        'Log l = LogFactory.getLog(Foo.class); l.warn("x " + v + "\\u000a");\n'
+        'logger.info("\\n" + marker + "\\n");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    hits = [i for i in issues if i.rule_id == "R109-javalogcrlf"]
+    assert [i.line for i in hits] == list(range(1, len(src.splitlines()) + 1)), hits
+    assert all(i.severity == "high" for i in hits)
+
+
+def test_javalogcrlf_literal_or_safe_logs_stay_quiet():
+    """R109-javalogcrlf stays quiet for fixed literals, concatenations
+    without embedded CR/LF, CR/LF without a non-literal payload, non-log
+    sinks, LOG.log(...) API forms, comment/string-literal reproductions,
+    request-accessor logging (R084-javalog domain) and CustomLogger
+    receivers."""
+    src = (
+        'logger.info("fixed message");\n'
+        'LOG.info("ok " + result);\n'
+        'logger.info("msg " + uid + "\\t");\n'
+        'logger.info("line1\\nline2");\n'
+        'System.out.println("user " + user + "\\n");\n'
+        'logger.info("a" + "b" + "\\n");\n'
+        '// logger.info("x " + u + "\\n");\n'
+        'String s = "logger.info(\\"x \\" + u + \\"\\\\n\\");";\n'
+        'LOG.info("user " + request.getParameter("u"));\n'
+        'LOG.log(Level.INFO, "user " + u + "\\n");\n'
+        'logger.info("task completed");\n'
+        'log.fatal("x " + u + " finished");\n'
+        'logger.info(action + "\\\\r" + suffix);\n'
+        'logger.info("timeouts: " + n + " of " + m);\n'
+        'LOG.info(user);\n'
+        'CustomLogger.info("x " + u + "\\n");\n'
+    )
+    issues, _ = analyze_to_issues(_inline_diff(src, path="x.java"))
+    assert not [i for i in issues if i.rule_id == "R109-javalogcrlf"], [
+        (i.rule_id, i.line, i.snippet) for i in issues if i.rule_id == "R109-javalogcrlf"
+    ]
+
+
 def test_existing_rule_library_integrity():
     # every rule id is unique and has valid category/severity
     assert len(RULES) == len({r.id for r in RULES.values()})
@@ -5501,6 +5559,7 @@ def test_every_rule_has_test_exposure():
         "R106-javaredir",
         "R107-javapbeparm",
         "R108-javasslclient",
+        "R109-javalogcrlf",
     }
     assert exposed <= rids
     uncovered = rids - exposed

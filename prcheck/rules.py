@@ -3753,6 +3753,29 @@ _RULE_TUPLES = [
         r"|(?:(?<![/\w'\"*])(?<!/ )(?<!\* )(?<!//)(?!/\*)(?:[A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*(?:\s*\(\s*\))?)*|new\s+[\w.$]+(?:\.[A-Za-z_]\w*)*\s*\(\s*\))\s*\.\s*(?:setHostnameVerifier|setSSLHostnameVerifier|setDefaultHostnameVerifier)\s*\(\s*[Nn]oopHostnameVerifier\s*\.\s*INSTANCE\s*\))",
         "A Java HTTP/TLS client is wired with a trust-all or insecure SSLContext / SSLSocketFactory / X509TrustManager (or NoopHostnameVerifier.INSTANCE), silently disabling certificate and hostname verification - CWE-295. The client then accepts any server certificate (including one forged by an attacker) and skips the hostname check, letting a man-in-the-middle intercept every request it sends (credentials, tokens, PII). Build the SSLContext from the platform trust store (trustManagerFactory.init((KeyStore) null)) and verify hostnames against the server's expected CN/SAN, or keep the JDK defaults by not configuring sslContext / sslSocketFactory at all and letting the higher-level builder manage verification; delete the trust-all context and any NoopHostnameVerifier wiring. Trust-all IMPLEMENTATIONS (empty checkServerTrusted bodies, verify->true lambdas, sslContext.init with an inline empty/trustAll TrustManager arg) are R071-javatls's domain; generic-named variables (sslContext, trustManager, socketFactory), 1-arg sslSocketFactory(factory) (keeps the default trust manager), SSLContext.getInstance() staging, adequate named hostname verifiers, and comment/string-literal reproductions stay quiet",
     ),
+    (
+        # R109-javalogcrlf: Java logging sinks whose message embeds a CR/LF
+        # control sequence (\\n, \\r, \\r\\n, or \\u000a/\\u000d unicode newline) while the
+        # payload is concatenated from non-literal data - "prefix" + var or
+        # var + "suffix" - CWE-117 log injection.  Three branches:
+        #   BR1  plain receivers logger|LOG|LOGGER|Log|log|l .info/debug/...
+        #   BR2  Logger.getLogger("x").(method)(...) / LogManager chain
+        #   BR3  LoggerFactory.getLogger / LogFactory.getLog chains
+        # Each branch requires BOTH a CRLF escape inside the call and a non-literal
+        # concatenation (LTR: "...", + var; RTL: var[.chain] + "..."), so static
+        # messages, constant-only concatenations and multi-line payloads stay quiet.
+        # Literal-only logs, request-accessor logging (R084-javalog, CWE-532),
+        # console/System.out sinks (R036-loginj, CWE-117) and non-log sinks are
+        # the siblings' domains.
+        "R109-javalogcrlf",
+        "security",
+        "high",
+        "Java backend log sinks write a CR/LF-containing message assembled from a non-literal concatenation - logger./LOG./LOGGER./log./l.info/debug/trace/warn/warning/error/fatal/fine/finer/finest/severe (or Logger.getLogger / LoggerFactory.getLogger / LogFactory.getLog chain) with a payload like \"prefix\" + var or var + \"suffix\" where the string embeds \\n / \\r / \\r\\n / \\\\u000a(d) - CWE-117",
+        "(?:(?<![/\\w'\\\"*])(?<!/ )(?<!\\* )(?<!//)(?!/\\*)\\b(?:logger|LOG|LOGGER|Log|log|l)\\s*\\.\\s*(?:info|debug|trace|warn|warning|error|fatal|fine|finer|finest|severe)\\s*\\((?=[^\\n;]*(?<![\\\\])(?:\\\\[rn]|\\\\u000[aAdD]))(?=[^\\n;]*(?:[^\\n;]*(?<![\\\\\\\"])\\\"\\s*\\+\\s*[^\\\")\\s\\d]|[^\\n;]*(?<![\\\"\\w])[A-Za-z_]\\w*(?:\\s*\\.\\s*[A-Za-z_]\\w*(?:\\s*\\(\\s*\\))?)*\\s*\\+\\s*\\\"))[^\\n;]*\\))"
+        "|(?:(?<![/\\w'\\\"*])(?<!/ )(?<!\\* )(?<!//)(?!/\\*)\\b(?:Logger|LogManager)\\s*\\.\\s*getLogger\\s*\\([^)\\n]*?\\)\\s*\\.\\s*(?:info|debug|trace|warn|warning|error|fatal|fine|finer|finest|severe)\\s*\\((?=[^\\n;]*(?<![\\\\])(?:\\\\[rn]|\\\\u000[aAdD]))(?=[^\\n;]*(?:[^\\n;]*(?<![\\\\\\\"])\\\"\\s*\\+\\s*[^\\\")\\s\\d]|[^\\n;]*(?<![\\\"\\w])[A-Za-z_]\\w*(?:\\s*\\.\\s*[A-Za-z_]\\w*(?:\\s*\\(\\s*\\))?)*\\s*\\+\\s*\\\"))[^\\n;]*\\))"
+        "|(?:(?<![/\\w'\\\"*])(?<!/ )(?<!\\* )(?<!//)(?!/\\*)\\b(?:LoggerFactory|LogFactory)\\s*\\.\\s*get(?:Logger|Log)\\s*\\([^)\\n]*?\\)\\s*\\.\\s*(?:info|debug|trace|warn|warning|error|fatal|fine|finer|finest|severe)\\s*\\((?=[^\\n;]*(?<![\\\\])(?:\\\\[rn]|\\\\u000[aAdD]))(?=[^\\n;]*(?:[^\\n;]*(?<![\\\\\\\"])\\\"\\s*\\+\\s*[^\\\")\\s\\d]|[^\\n;]*(?<![\\\"\\w])[A-Za-z_]\\w*(?:\\s*\\.\\s*[A-Za-z_]\\w*(?:\\s*\\(\\s*\\))?)*\\s*\\+\\s*\\\"))[^\\n;]*\\))",
+        "A Java logging call writes a message that embeds both a CR/LF control sequence and a concatenation of non-literal data - logger./LOG./LOGGER./log./l.info|debug|trace|warn|warning|error|fatal|fine|finer|finest|severe (or a Logger.getLogger / LoggerFactory.getLogger / LogFactory.getLog chain) receives a string containing \\n, \\r, \\r\\n or a \\u000a/\\u000d/\\u000A/\\u000D unicode newline while the payload is assembled as \"prefix\" + variable or variable + \"suffix\" - CWE-117 log injection. Log aggregators, SIEMs and support consoles parse each record as a line; a CR/LF smuggled in through user-influenced data terminates the record early so the attacker forges fake log lines, plants alarming-but-false events, pollutes dashboards/alerts or poisons downstream parsing. Sanitize the message (strip CR/LF, unicode newlines and control chars), log a fixed-format safe summary instead of raw concatenations, and never echo request-derived values unfiltered into logs. Request-ACCESSOR logging (R084-javalog, CWE-532) and Python/console/System.out sinks (R036-loginj, CWE-117) have their own rules; concatenations without an embedded CR/LF, CR/LF literals with no non-literal payload, non-log sinks, comment/string-literal reproductions and request-accessor whitelists stay quiet",
+    ),
     # ---- data -----------------------------------------------------
     (
         "D001",
